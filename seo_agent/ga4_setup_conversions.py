@@ -54,7 +54,14 @@ def main() -> int:
         )
         return 1
 
-    client = AnalyticsAdminServiceClient()
+    # Use the shared OAuth user creds (gsc-oauth-token.json) — the same
+    # token that drives gsc_client + ga4_client. Requires analytics.edit
+    # scope, which is in GSC_SCOPES; re-run `gsc_client --bootstrap`
+    # locally + scp the token if your existing token was minted before
+    # we added that scope.
+    from . import gsc_client
+    creds = gsc_client._load_oauth_creds(interactive=False)
+    client = AnalyticsAdminServiceClient(credentials=creds)
     parent = f"properties/{args.property}"
 
     # 1. Register custom dimension for `arx` if not already present.
