@@ -209,6 +209,7 @@ def _gather_metrics() -> dict:
             total_conv_this = int(crows_this[0]["n"]) if crows_this else 0
             total_conv_last = int(crows_last[0]["n"]) if crows_last else 0
     metrics["conversions"] = {"this_week": total_conv_this, "last_week": total_conv_last}
+    metrics["has_goal_slots"] = bool(slot_goals)
 
     # --- Striking-distance opportunities (positions 4-20 with high impressions) ---
     opps = d1_client.query(
@@ -408,7 +409,7 @@ def build_digest() -> tuple[str, str]:
           </tr>
         </table>
       </td>
-    </tr>{f'<tr><td style="padding:12px 24px;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:12px;color:#92400e"><strong>Heads up:</strong> No slots have a <code>goal_event</code> configured yet, so conversions are 0. Set <code>goal_event</code> on at least one slot in <code>site_config.py</code> to start optimizing for business outcomes.</td></tr>' if not slot_goals else ''}
+    </tr>{f'<tr><td style="padding:12px 24px;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:12px;color:#92400e"><strong>Heads up:</strong> No slots have a <code>goal_event</code> configured yet, so conversions are 0. Set <code>goal_event</code> on at least one slot in <code>site_config.py</code> to start optimizing for business outcomes.</td></tr>' if not m.get("has_goal_slots") else ''}
 
     <!-- Promoted / killed callouts (only render if something happened) -->
     {f'<tr><td style="padding:0 24px">{promoted_html}{killed_html}</td></tr>' if (promoted_html or killed_html) else ''}
