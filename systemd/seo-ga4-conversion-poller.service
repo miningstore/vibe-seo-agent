@@ -1,0 +1,18 @@
+[Unit]
+Description=vibe-seo-agent — nightly GA4 conversion poll
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/seo-agent
+EnvironmentFile=/home/ubuntu/seo-agent/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ubuntu/seo-agent
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ubuntu/seo-agent/seo_agent/.venv/bin/python -m seo_agent.ga4_conversion_poller --days 2
+StandardOutput=journal
+StandardError=journal
+MemoryMax=512M
+CPUQuota=50%

@@ -61,16 +61,31 @@ def load_variant_stats(slot: str) -> list[VariantStats]:
     ]
 
 
-def engagement_score_d1(variant_id: int, hours: int = 24) -> tuple[int, float]:
+# Default per-event reward weights. The conversion goal (Slot.goal_event)
+# overrides one of these to Slot.goal_weight when scoring a variant —
+# typically 5.0, making one conversion equivalent to 5 lead_clicks.
+DEFAULT_WEIGHTS = {
+    "view": 0.0,
+    "scroll_50": 0.2,
+    "scroll_90": 0.4,
+    "dwell_30s": 0.4,
+    "cta_click": 0.6,
+    "lead_click": 1.0,
+}
+
+
+def engagement_score_d1(
+    variant_id: int,
+    hours: int = 24,
+    slot: "cfg.Slot | None" = None,
+) -> tuple[int, float]:
     """Return (impressions, weighted_reward_sum) over the last N hours.
 
-    Weights:
-      view = 0          (baseline impression marker)
-      scroll_50 = 0.2
-      scroll_90 = 0.4
-      dwell_30s = 0.4
-      cta_click = 0.6
-      lead_click = 1.0
+    Per-event weights default to DEFAULT_WEIGHTS. When `slot.goal_event`
+    is set, the goal event gets `slot.goal_weight` (default 5.0) so
+    conversions dominate the reward signal once they start flowing.
+    Pass `slot=None` for callers that don't know which slot they're
+    scoring (falls back to engagement-only weights).
     """
     rows = d1_client.query(
         """SELECT event, COUNT(*) AS n
@@ -80,14 +95,9 @@ def engagement_score_d1(variant_id: int, hours: int = 24) -> tuple[int, float]:
            GROUP BY event""",
         [variant_id, hours],
     )
-    weights = {
-        "view": 0.0,
-        "scroll_50": 0.2,
-        "scroll_90": 0.4,
-        "dwell_30s": 0.4,
-        "cta_click": 0.6,
-        "lead_click": 1.0,
-    }
+    weights = dict(DEFAULT_WEIGHTS)
+    if slot is not None and getattr(slot, "goal_event", ""):
+        weights[slot.goal_event] = float(getattr(slot, "goal_weight", 5.0))
     impressions = 0
     reward = 0.0
     for r in rows:

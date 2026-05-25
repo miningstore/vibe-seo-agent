@@ -1,0 +1,16 @@
+[Unit]
+Description=vibe-seo-agent — schedule nightly GA4 conversion poll
+
+[Timer]
+# 03:30 server-local, 10 min after the GSC poller. Polls a 2-day
+# window so GA4's processing delay (typically 24-48h for events with
+# custom dimensions to be fully queryable) can't cause us to drop
+# conversions. The poller is idempotent per (variant_id, session_id,
+# event, date), so re-querying the same range is safe.
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=600
+Persistent=true
+Unit=seo-ga4-conversion-poller.service
+
+[Install]
+WantedBy=timers.target

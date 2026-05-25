@@ -44,7 +44,8 @@ log = logging.getLogger("seo_agent.gsc_client")
 # scopes in the consent prompt rather than re-prompting per API.
 GSC_SCOPES = [
     "https://www.googleapis.com/auth/webmasters.readonly",   # Search Console
-    "https://www.googleapis.com/auth/analytics.readonly",    # GA4 Data API
+    "https://www.googleapis.com/auth/analytics.readonly",    # GA4 Data API (read)
+    "https://www.googleapis.com/auth/analytics.edit",        # GA4 Admin API (register conversions + custom dimensions, see ga4_setup_conversions.py)
 ]
 DEFAULT_SECRETS = "credentials/gsc-oauth-secrets.json"
 DEFAULT_TOKEN = "credentials/gsc-oauth-token.json"

@@ -272,7 +272,7 @@ def _load_champion(slot: cfg.Slot, page_match: dict) -> dict | None:
 def _update_posteriors_for_slot(slot: cfg.Slot) -> None:
     stats = allocator.load_variant_stats(slot.name)
     for s in stats:
-        imps, reward = allocator.engagement_score_d1(s.variant_id, hours=24)
+        imps, reward = allocator.engagement_score_d1(s.variant_id, hours=24, slot=slot)
         if imps > 0:
             allocator.update_posterior(s.variant_id, imps, reward)
 

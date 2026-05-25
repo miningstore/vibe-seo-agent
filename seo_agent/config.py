@@ -70,6 +70,18 @@ class Slot:
     # Each entry is the bare name without braces, e.g. ("city",) means
     # `{city}` is allowed.
     template_vars: tuple[str, ...] = field(default_factory=tuple)
+    # Per-slot conversion goal. When set, the allocator weights this
+    # event_name by goal_weight in the reward function (default 5x
+    # over lead_click), and the variant generator prompt tells Claude
+    # to optimize for this specific conversion. When empty, the slot
+    # falls back to the generic engagement-only reward (view / scroll /
+    # dwell / cta_click / lead_click). Common goal_event values:
+    #   pro_checkout_complete   - paid subscription signup
+    #   book_call               - Calendly / consultation booked
+    #   quote_request           - contact form / quote requested
+    #   newsletter_signup       - email list opt-in
+    goal_event: str = ""
+    goal_weight: float = 5.0
 
 
 # === EDIT BELOW: tokens that may never appear in your variants ===

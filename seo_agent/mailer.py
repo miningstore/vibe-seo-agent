@@ -151,6 +151,16 @@ def _gather_metrics() -> dict:
     metrics["promoted"] = [_simplify_variant(r) for r in (promoted or [])]
 
     # --- Active variants currently sampling ---
+    # Conversion count per variant: we look up each slot's goal_event
+    # from the loaded config (cfg.SLOTS) and count seo_outcomes rows
+    # matching that event. Variants whose slot has no goal_event get
+    # conversions=0 (treated as engagement-only).
+    slot_goals: dict[str, str] = {}
+    for s in cfg.SLOTS:
+        ge = getattr(s, "goal_event", "")
+        if ge:
+            slot_goals[s.name] = ge
+
     active = d1_client.query(
         """SELECT v.id, v.slot, v.page_match, v.treatment, v.hypothesis,
                   v.alpha, v.beta,
@@ -158,7 +168,47 @@ def _gather_metrics() -> dict:
            FROM seo_variants v WHERE v.status='active'
            ORDER BY v.slot, v.id"""
     )
-    metrics["active"] = [_simplify_variant(r) for r in (active or [])]
+    simplified_active = []
+    for r in (active or []):
+        s = _simplify_variant(r)
+        ge = slot_goals.get(s["slot"], "")
+        if ge:
+            crows = d1_client.query(
+                "SELECT COUNT(*) AS n FROM seo_outcomes WHERE variant_id = ?1 AND event = ?2",
+                [s["id"], ge],
+            )
+            s["conversions"] = int(crows[0]["n"]) if crows else 0
+            s["goal_event"] = ge
+        else:
+            s["conversions"] = 0
+            s["goal_event"] = ""
+        simplified_active.append(s)
+    metrics["active"] = simplified_active
+
+    # --- Total conversions (7d) across all slots with a goal_event ---
+    total_conv_this = 0
+    total_conv_last = 0
+    if slot_goals:
+        goal_events_in = "(" + ",".join(["?"] * len(slot_goals)) + ")"
+        ge_values = list(set(slot_goals.values()))
+        if ge_values:
+            placeholders = ",".join(["?"] * len(ge_values))
+            crows_this = d1_client.query(
+                f"""SELECT COUNT(*) AS n FROM seo_outcomes
+                    WHERE event IN ({placeholders})
+                      AND recorded_at >= datetime('now', '-7 days')""",
+                ge_values,
+            )
+            crows_last = d1_client.query(
+                f"""SELECT COUNT(*) AS n FROM seo_outcomes
+                    WHERE event IN ({placeholders})
+                      AND recorded_at >= datetime('now', '-14 days')
+                      AND recorded_at <  datetime('now', '-7 days')""",
+                ge_values,
+            )
+            total_conv_this = int(crows_this[0]["n"]) if crows_this else 0
+            total_conv_last = int(crows_last[0]["n"]) if crows_last else 0
+    metrics["conversions"] = {"this_week": total_conv_this, "last_week": total_conv_last}
 
     # --- Striking-distance opportunities (positions 4-20 with high impressions) ---
     opps = d1_client.query(
@@ -248,26 +298,36 @@ def build_digest() -> tuple[str, str]:
                 "</tr>"
             )
 
-    # Active variants table
+    # Active variants table — now with Conv / Conv% columns
     variant_rows_html = ""
     if not m["active"]:
         variant_rows_html = (
-            '<tr><td colspan="3" style="padding:12px;color:#999;text-align:center;font-size:12px">'
+            '<tr><td colspan="4" style="padding:12px;color:#999;text-align:center;font-size:12px">'
             "No active variants yet."
             "</td></tr>"
         )
     else:
         for v in m["active"][:15]:
-            sessions = v.get("sessions", 0)
+            sessions = int(v.get("sessions", 0) or 0)
+            convs = int(v.get("conversions", 0) or 0)
+            cr = (convs / sessions * 100) if sessions else 0.0
+            goal_label = v.get("goal_event") or "—"
             text = escape((v.get("treatment_text") or "")[:80])
             slot_short = escape(v["slot"])
             path = escape(v.get("page_match_path", "*"))
             hyp = escape((v.get("hypothesis") or "")[:90])
+            conv_cell = (
+                f'<strong>{convs}</strong>'
+                f'<br><span style="color:#94a3b8;font-size:10px">{cr:.2f}% · {escape(goal_label)}</span>'
+                if v.get("goal_event")
+                else '<span style="color:#cbd5e1">—</span>'
+            )
             variant_rows_html += (
                 "<tr>"
                 f'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:11px;font-weight:600;vertical-align:top">{slot_short}<br><span style="color:#94a3b8;font-weight:400">{path}</span></td>'
                 f'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:12px;vertical-align:top;font-family:monospace">{text}<br><span style="color:#94a3b8;font-family:Arial;font-size:11px">{hyp}</span></td>'
                 f'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:12px;text-align:right;vertical-align:top">{sessions}</td>'
+                f'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:12px;text-align:right;vertical-align:top">{conv_cell}</td>'
                 "</tr>"
             )
 
@@ -325,25 +385,30 @@ def build_digest() -> tuple[str, str]:
       <td style="padding:0;border-bottom:1px solid #eee">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
-            <td width="33%" style="padding:20px 0 20px 24px;vertical-align:top">
-              <div style="font-size:28px;font-weight:700;color:#0f172a;line-height:1">{tw['imp']:,}</div>
+            <td width="25%" style="padding:20px 0 20px 24px;vertical-align:top">
+              <div style="font-size:24px;font-weight:700;color:#0f172a;line-height:1">{tw['imp']:,}</div>
               <div style="font-size:11px;color:#94a3b8;margin-top:4px">Impressions (7d)</div>
               <div style="font-size:12px;color:{_delta_color(tw['imp'], lw['imp'])};margin-top:2px">{_pct_change(tw['imp'], lw['imp'])} vs prior 7d</div>
             </td>
-            <td width="33%" style="padding:20px 0;vertical-align:top">
-              <div style="font-size:28px;font-weight:700;color:#0f172a;line-height:1">{tw['clk']:,}</div>
+            <td width="25%" style="padding:20px 0;vertical-align:top">
+              <div style="font-size:24px;font-weight:700;color:#0f172a;line-height:1">{tw['clk']:,}</div>
               <div style="font-size:11px;color:#94a3b8;margin-top:4px">Clicks (7d)</div>
               <div style="font-size:12px;color:{_delta_color(tw['clk'], lw['clk'])};margin-top:2px">{_pct_change(tw['clk'], lw['clk'])} vs prior 7d</div>
             </td>
-            <td width="34%" style="padding:20px 24px 20px 0;vertical-align:top">
-              <div style="font-size:28px;font-weight:700;color:#0f172a;line-height:1">{(tw['clk']/tw['imp']*100 if tw['imp'] else 0):.2f}%</div>
+            <td width="25%" style="padding:20px 0;vertical-align:top">
+              <div style="font-size:24px;font-weight:700;color:#0f172a;line-height:1">{(tw['clk']/tw['imp']*100 if tw['imp'] else 0):.2f}%</div>
               <div style="font-size:11px;color:#94a3b8;margin-top:4px">CTR (7d)</div>
               <div style="font-size:12px;color:#94a3b8;margin-top:2px">avg position {tw['pos']:.1f}</div>
+            </td>
+            <td width="25%" style="padding:20px 24px 20px 0;vertical-align:top">
+              <div style="font-size:24px;font-weight:700;color:#0f172a;line-height:1">{m['conversions']['this_week']:,}</div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:4px">Conversions (7d)</div>
+              <div style="font-size:12px;color:{_delta_color(m['conversions']['this_week'], m['conversions']['last_week'])};margin-top:2px">{_pct_change(m['conversions']['this_week'], m['conversions']['last_week'])} vs prior 7d</div>
             </td>
           </tr>
         </table>
       </td>
-    </tr>
+    </tr>{f'<tr><td style="padding:12px 24px;background:#fffbeb;border-bottom:1px solid #fde68a;font-size:12px;color:#92400e"><strong>Heads up:</strong> No slots have a <code>goal_event</code> configured yet, so conversions are 0. Set <code>goal_event</code> on at least one slot in <code>site_config.py</code> to start optimizing for business outcomes.</td></tr>' if not slot_goals else ''}
 
     <!-- Promoted / killed callouts (only render if something happened) -->
     {f'<tr><td style="padding:0 24px">{promoted_html}{killed_html}</td></tr>' if (promoted_html or killed_html) else ''}
@@ -374,6 +439,7 @@ def build_digest() -> tuple[str, str]:
             <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600">Slot / Path</td>
             <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600">Variant text + hypothesis</td>
             <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600;text-align:right">Sessions</td>
+            <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600;text-align:right">Conv / Goal</td>
           </tr>
           {variant_rows_html}
         </table>

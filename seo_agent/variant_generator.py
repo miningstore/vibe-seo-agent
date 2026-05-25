@@ -70,6 +70,56 @@ def generate(
 
 # --- Prompt construction ------------------------------------------------
 
+# Conversion-goal coaching per event family. The agent uses this to
+# tip Claude toward variant angles that drive the actual business
+# conversion, not just generic SEO engagement.
+_GOAL_COACHING = {
+    "pro_checkout_complete": (
+        "Signal scarcity + value-vs-price. Variants should make the "
+        "paid tier feel essential (e.g. 'access locked listings', "
+        "'beat the cycle'). Avoid soft 'learn more' framings."
+    ),
+    "book_call": (
+        "Signal expertise + low friction. Variants should make booking "
+        "a call feel like the obvious next step (e.g. 'free 15 min '"
+        "'consult', 'talk to someone who actually mines'). Avoid "
+        "salesy verbs; favor 'see if we're a fit'."
+    ),
+    "quote_request": (
+        "Signal speed + customization. Variants should promise a "
+        "tailored answer fast (e.g. 'get pricing in 24h', 'custom "
+        "quote for your rig'). Avoid generic 'contact us'."
+    ),
+    "newsletter_signup": (
+        "Signal one specific recurring value (e.g. 'weekly market "
+        "snapshot', 'daily mining yield report'). Avoid vague "
+        "'subscribe for updates'."
+    ),
+}
+
+
+def _goal_block(slot: cfg.Slot) -> str:
+    """Render the goal-aware coaching paragraph injected into the prompt.
+
+    Empty string when the slot has no goal_event — the agent then
+    optimizes for generic engagement only (the legacy behavior)."""
+    ge = getattr(slot, "goal_event", "")
+    if not ge:
+        return ""
+    weight = getattr(slot, "goal_weight", 5.0)
+    coaching = _GOAL_COACHING.get(
+        ge,
+        "Optimize copy to drive this specific event from real visitors.",
+    )
+    return (
+        f"- **PRIMARY GOAL**: drive `{ge}` events (weighted {weight}x "
+        f"over engagement signals in the reward function).\n"
+        f"  {coaching}\n"
+        f"  Variants that look good on engagement but DON'T move "
+        f"`{ge}` will lose to ones that do.\n"
+    )
+
+
 def _build_prompt(
     slot: cfg.Slot,
     page_match: dict,
@@ -96,7 +146,7 @@ def _build_prompt(
 - **description**: {slot.description}
 - **page-match predicate**: `{json.dumps(page_match)}`
 - **allowed placeholders**: {('{' + '}, {'.join(slot.template_vars) + '}') if slot.template_vars else 'NONE — any {placeholder} in your output will be rejected'}{f' — these will be substituted at render time, so use them.' if slot.template_vars else ''}
-
+{_goal_block(slot)}
 # Current champion copy
 
 ```json
