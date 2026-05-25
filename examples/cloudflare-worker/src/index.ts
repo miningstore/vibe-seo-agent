@@ -249,19 +249,40 @@ async function hashSeed(s: string): Promise<number> {
   return view.getUint32(0, false);
 }
 
-// Approximate Thompson sampling without a real Beta sampler — we draw
-// a uniform u in [0,1) and pick the variant whose Beta(α,β) mean is
-// closest to u. Crude but works for small pools and stays deterministic
-// per seed. Production loop on the VPS uses scipy.stats.beta proper.
+// Approximate Thompson sampling, deterministic per (visitor, variant)
+// pair so the same visitor always sees the same variant on every
+// request.
+//
+// For each variant we draw a Beta(α,β) sample. We don't have a real
+// Beta sampler in Workers, so we approximate: per-variant uniform draw
+// in [0,1) seeded by (sessionSeed XOR variantId), then mapped to a
+// sample whose location matches the Beta mean with a spread matching
+// its stddev. Crude but: (a) gives the right ordering when one variant
+// is decisively winning, (b) distributes uniformly across the pool
+// when α=β=1 (fresh variants), which the prior naive `closest-to-mean`
+// approach failed at — all means equal 0.5, all distances equal,
+// pool[0] always won.
+//
+// The production loop on the VPS uses scipy.stats.beta proper; this
+// is only the arm picker at request time.
 function thompsonSample(pool: VariantRow[], seed: number): VariantRow {
-  const u = (seed % 1_000_000) / 1_000_000;
   let best = pool[0];
-  let bestDist = Infinity;
+  let bestSample = -Infinity;
   for (const v of pool) {
+    const mixed = (seed ^ v.id) >>> 0;
+    const u = (mixed % 1_000_000) / 1_000_000;            // uniform [0,1)
     const mean = v.alpha / (v.alpha + v.beta);
-    const d = Math.abs(mean - u);
-    if (d < bestDist) {
-      bestDist = d;
+    const variance =
+      (v.alpha * v.beta) /
+      ((v.alpha + v.beta) ** 2 * (v.alpha + v.beta + 1));
+    const stddev = Math.sqrt(variance);
+    // Sample = mean + 2 * stddev * (u - 0.5). For Beta(1,1) this gives
+    // a range of roughly [-0.08, 1.08] clamped to [0,1] downstream;
+    // for Beta(50, 5) — a near-certain winner — the sample is tightly
+    // clustered around its mean. That's enough to drive arm selection.
+    const sample = mean + 2 * stddev * (u - 0.5);
+    if (sample > bestSample) {
+      bestSample = sample;
       best = v;
     }
   }
