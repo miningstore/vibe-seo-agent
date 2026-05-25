@@ -86,8 +86,31 @@ def engagement_score_d1(
     conversions dominate the reward signal once they start flowing.
     Pass `slot=None` for callers that don't know which slot they're
     scoring (falls back to engagement-only weights).
+
+    Impression source: seo_assignments, NOT view events. SSR sites
+    (average-rent) get a `view` row per pageload via the in-page
+    tracker; static sites (miningstore) only get a single assignment
+    row when the Worker first sees a session. Using assignments means
+    the impression count works for both — SSR sites lose a little
+    accuracy on repeat visits (one assignment row per
+    session/slot/path regardless of repeat views), static sites get
+    the right count instead of zero. Both keep their reward signal
+    intact (engagement events still get their weights from
+    DEFAULT_WEIGHTS).
     """
-    rows = d1_client.query(
+    imp_rows = d1_client.query(
+        """SELECT COUNT(*) AS n FROM seo_assignments
+           WHERE variant_id = ?1
+             AND assigned_at > datetime('now', '-' || ?2 || ' hours')""",
+        [variant_id, hours],
+    )
+    impressions = int(imp_rows[0]["n"]) if imp_rows else 0
+
+    weights = dict(DEFAULT_WEIGHTS)
+    if slot is not None and getattr(slot, "goal_event", ""):
+        weights[slot.goal_event] = float(getattr(slot, "goal_weight", 5.0))
+
+    out_rows = d1_client.query(
         """SELECT event, COUNT(*) AS n
            FROM seo_outcomes
            WHERE variant_id = ?1
@@ -95,16 +118,10 @@ def engagement_score_d1(
            GROUP BY event""",
         [variant_id, hours],
     )
-    weights = dict(DEFAULT_WEIGHTS)
-    if slot is not None and getattr(slot, "goal_event", ""):
-        weights[slot.goal_event] = float(getattr(slot, "goal_weight", 5.0))
-    impressions = 0
     reward = 0.0
-    for r in rows:
+    for r in out_rows:
         n = int(r["n"])
         ev = r["event"]
-        if ev == "view":
-            impressions += n
         reward += n * weights.get(ev, 0.0)
     return impressions, reward
 

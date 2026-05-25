@@ -168,13 +168,28 @@ def _gather_metrics() -> dict:
            FROM seo_variants v WHERE v.status='active'
            ORDER BY v.slot, v.id"""
     )
+    # 7-day window matches the headline Conversions tile and the
+    # existing GSC impressions/clicks tiles, so users reading the
+    # digest don't see one column showing "this week" while another
+    # silently aggregates all-time.
     simplified_active = []
     for r in (active or []):
         s = _simplify_variant(r)
         ge = slot_goals.get(s["slot"], "")
+        # Sessions in last 7 days (same window as conversions below).
+        sess_rows = d1_client.query(
+            """SELECT COUNT(*) AS n FROM seo_assignments
+               WHERE variant_id = ?1
+                 AND assigned_at >= datetime('now', '-7 days')""",
+            [s["id"]],
+        )
+        s["sessions_7d"] = int(sess_rows[0]["n"]) if sess_rows else 0
         if ge:
             crows = d1_client.query(
-                "SELECT COUNT(*) AS n FROM seo_outcomes WHERE variant_id = ?1 AND event = ?2",
+                """SELECT COUNT(*) AS n FROM seo_outcomes
+                   WHERE variant_id = ?1
+                     AND event = ?2
+                     AND recorded_at >= datetime('now', '-7 days')""",
                 [s["id"], ge],
             )
             s["conversions"] = int(crows[0]["n"]) if crows else 0
@@ -309,14 +324,22 @@ def build_digest() -> tuple[str, str]:
         )
     else:
         for v in m["active"][:15]:
-            sessions = int(v.get("sessions", 0) or 0)
+            # All-time sessions is informational; 7d is the bandit-
+            # learning window and what the conversion rate is computed
+            # against (matches the headline tile).
+            sessions_total = int(v.get("sessions", 0) or 0)
+            sessions_7d = int(v.get("sessions_7d", 0) or 0)
             convs = int(v.get("conversions", 0) or 0)
-            cr = (convs / sessions * 100) if sessions else 0.0
+            cr = (convs / sessions_7d * 100) if sessions_7d else 0.0
             goal_label = v.get("goal_event") or "—"
             text = escape((v.get("treatment_text") or "")[:80])
             slot_short = escape(v["slot"])
             path = escape(v.get("page_match_path", "*"))
             hyp = escape((v.get("hypothesis") or "")[:90])
+            sess_cell = (
+                f'<strong>{sessions_7d}</strong>'
+                f'<br><span style="color:#94a3b8;font-size:10px">{sessions_total} all-time</span>'
+            )
             conv_cell = (
                 f'<strong>{convs}</strong>'
                 f'<br><span style="color:#94a3b8;font-size:10px">{cr:.2f}% · {escape(goal_label)}</span>'
@@ -327,7 +350,7 @@ def build_digest() -> tuple[str, str]:
                 "<tr>"
                 f'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:11px;font-weight:600;vertical-align:top">{slot_short}<br><span style="color:#94a3b8;font-weight:400">{path}</span></td>'
                 f'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:12px;vertical-align:top;font-family:monospace">{text}<br><span style="color:#94a3b8;font-family:Arial;font-size:11px">{hyp}</span></td>'
-                f'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:12px;text-align:right;vertical-align:top">{sessions}</td>'
+                f'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:12px;text-align:right;vertical-align:top">{sess_cell}</td>'
                 f'<td style="padding:8px 12px;border-bottom:1px solid #eee;font-size:12px;text-align:right;vertical-align:top">{conv_cell}</td>'
                 "</tr>"
             )
@@ -439,8 +462,8 @@ def build_digest() -> tuple[str, str]:
           <tr style="background:#f8fafc">
             <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600">Slot / Path</td>
             <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600">Variant text + hypothesis</td>
-            <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600;text-align:right">Sessions</td>
-            <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600;text-align:right">Conv / Goal</td>
+            <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600;text-align:right">Sessions (7d)</td>
+            <td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-weight:600;text-align:right">Conv (7d) / Goal</td>
           </tr>
           {variant_rows_html}
         </table>
