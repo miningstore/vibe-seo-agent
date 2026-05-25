@@ -14,6 +14,53 @@ choices that depend on your stack.
 | `<your-site>/middleware.*` | hook the variant lookup into render (see Astro example) |
 | `<your-site>/migrations/*.sql` | add the 4 seo_* tables to your DB |
 
+## Template placeholders (the cross-page trick)
+
+A slot's `page_match` predicate determines which pages a variant
+applies to:
+
+- `page_match={}`  → the variant applies to **every page** matching
+  the slot's `pattern` (e.g. every city listing page).
+- `page_match={"city":"austin-tx"}` → the variant applies to ONE city.
+
+For `page_match={}` slots, you need **template placeholders** like
+`{city}` or `{unit_count}` in the variant text — otherwise the same
+literal string renders on every city's page, which is bad for SEO.
+
+Whitelist the allowed placeholders in `template_vars`:
+
+```python
+Slot(
+    name="apartments_listing.h1",
+    pattern="apartments_listing",
+    kind="text",
+    enabled=True,
+    description="H1 on /city/{city}/apartments/. Variants may use {city}, "
+                "{property_count}, {unit_count}.",
+    min_len=15, max_len=80,
+    banned_tokens=HOUSE_STYLE_BANNED,
+    template_vars=("city", "property_count", "unit_count"),
+)
+```
+
+Then in your page template:
+
+```astro
+{pickSlotText(
+  Astro.locals.seoVariants,
+  'apartments_listing.h1',
+  `${cityDisplay} Apartments`,  // fallback if no variant
+  'text',
+  { city: cityDisplay, property_count: String(n), unit_count: String(units) },
+)}
+```
+
+The validator allows the Claude-generated text to use any
+whitelisted placeholder; the helper substitutes them at render time.
+**Unknown placeholders are rejected** — if Claude proposes
+`{foo}` and `foo` isn't in `template_vars`, the variant is rejected
+with a clear error message in the agent's log.
+
 ## Choosing slots
 
 A **slot** is one copy surface you want the agent to vary on one

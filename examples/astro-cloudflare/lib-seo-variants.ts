@@ -2,11 +2,18 @@
  * Reference implementation — adapt the PAGE_PATTERNS array below for
  * your site's URL structure. The middleware shape (cookie minting,
  * bot detection, Thompson sampling, D1 lookup, fire-and-forget
- * assignment write) is generic and reusable as-is.
+ * assignment write, fallback for bots when no champion exists) is
+ * generic and reusable as-is.
  *
  * Copy this into your Astro site's `src/middleware.ts` (and the
  * helper into `src/lib/seo-variants.ts`), then `pickSlotText` from
  * your page templates.
+ *
+ * Bot safety: when no champion has been promoted yet, bots see the
+ * literal fallback string from the template (NOT the "first active"
+ * variant). This avoids Google flagging cloaking when variants get
+ * added/killed across crawls. Once a champion is named, bots see it
+ * consistently from then on.
  *
  * Originally extracted from average-rent.com — see project history.
  */
@@ -94,12 +101,20 @@ export function pickSlotText(
   slot: string,
   fallback: string,
   field: string = 'text',
+  vars: Record<string, string | number> = {},
 ): string {
   const v = variants?.[slot];
   if (!v || !v.treatment) return fallback;
   const candidate = v.treatment[field];
-  if (typeof candidate === 'string' && candidate.length > 0) return candidate;
-  return fallback;
+  if (typeof candidate !== 'string' || candidate.length === 0) return fallback;
+  // Substitute {name} placeholders against `vars`. Unknown placeholders
+  // are left in place — the validator on the agent side rejects unknown
+  // ones, so anything that lands here is a name the agent was told it
+  // could use. Leaving unknowns visible makes their absence diagnosable.
+  if (!candidate.includes('{')) return candidate;
+  return candidate.replace(/\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g, (m, key) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : m,
+  );
 }
 
 /** Pick a JSON treatment object (e.g. schema fragment) with fallback. */
@@ -194,9 +209,14 @@ export async function resolveVariants(args: ResolveArgs): Promise<{ variants: Va
     let chosen: VariantRow | null = null;
     if (args.isBot || !args.sessionId) {
       // Bots and any session-less request: champion-only. If there's no
-      // champion (early in life of a slot), fall back to the first active
-      // variant so crawlers see *something* stable.
-      chosen = champion ?? active[0] ?? null;
+      // champion yet (early in a slot's life), we DELIBERATELY return
+      // null so pickSlotText falls back to the literal fallback string
+      // in the template. Two reasons:
+      //   1. Otherwise the "first active" can drift across crawls as
+      //      variants get added/killed, which Google may flag as cloaking.
+      //   2. The literal fallback is deterministic across deploys, so
+      //      every crawl sees the same HTML for a given path.
+      chosen = champion ?? null;
     } else {
       // Deterministic per (session_id, slot): the same visitor sees the
       // same variant on every request, even if the bucket is replenished.

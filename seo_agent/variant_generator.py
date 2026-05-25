@@ -95,6 +95,7 @@ def _build_prompt(
 - **length bounds**: {slot.min_len}–{slot.max_len} characters
 - **description**: {slot.description}
 - **page-match predicate**: `{json.dumps(page_match)}`
+- **allowed placeholders**: {('{' + '}, {'.join(slot.template_vars) + '}') if slot.template_vars else 'NONE — any {placeholder} in your output will be rejected'}{f' — these will be substituted at render time, so use them.' if slot.template_vars else ''}
 
 # Current champion copy
 
@@ -141,18 +142,37 @@ def _invoke_claude(prompt: str) -> tuple[str, float]:
     if not shutil.which(cfg.CLAUDE_BIN) and not Path(cfg.CLAUDE_BIN).exists():
         raise RuntimeError(f"claude CLI not found at {cfg.CLAUDE_BIN}")
 
+    # NOTE: do NOT pass --bare. That flag disables OAuth/keychain and
+    # forces ANTHROPIC_API_KEY auth, which we don't use — we authenticate
+    # via the Claude Code plan credentials at ~/.claude/.credentials.json
+    # (same as autoresearch.service). The -p (--print) flag is what gives
+    # us non-interactive single-shot output without disabling plan auth.
     args = [
         cfg.CLAUDE_BIN,
         "-p", prompt,
-        "--bare",
+        "--output-format", "text",
+        "--allowedTools", "Read,Glob,Grep",
         "--model", cfg.CLAUDE_MODEL,
         "--max-turns", str(cfg.CLAUDE_TURN_CAP),
     ]
-    if cfg.MCP_CONFIG.exists():
-        args += [
-            "--mcp-config", str(cfg.MCP_CONFIG),
-            "--allowedTools", "mcp__analytics-mcp__*",
-        ]
+    if cfg.MCP_CONFIG.exists() and cfg.MCP_CONFIG.stat().st_size > 50:
+        # Only wire MCPs if .mcp.json declares any servers. An empty
+        # `{"mcpServers": {}}` shouldn't be passed — claude treats it
+        # as a hard requirement and errors if it can't reach the server.
+        try:
+            import json as _json
+            with open(cfg.MCP_CONFIG) as _f:
+                _mcp_cfg = _json.load(_f)
+            if _mcp_cfg.get("mcpServers"):
+                args += [
+                    "--mcp-config", str(cfg.MCP_CONFIG),
+                    "--allowedTools",
+                    "Read,Glob,Grep," + ",".join(
+                        f"mcp__{name}__*" for name in _mcp_cfg["mcpServers"].keys()
+                    ),
+                ]
+        except Exception:
+            pass
 
     proc = subprocess.run(
         args,
@@ -240,9 +260,17 @@ def validate_treatment(slot: cfg.Slot, treatment: Any) -> list[str]:
         for token in slot.banned_tokens:
             if token.lower() in low:
                 errors.append(f"contains banned token '{token}'")
-        # Defensive: reject obviously fake-templated bytes that escaped substitution.
-        if "{" in text and "}" in text:
-            errors.append("text contains unresolved {placeholders}")
+        # Placeholders: allow only the ones whitelisted on the slot. Any
+        # other {name} pattern is a sign the LLM emitted a templating
+        # artefact that won't get substituted at render time.
+        found = set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", text))
+        allowed = set(slot.template_vars)
+        unknown = found - allowed
+        if unknown:
+            errors.append(
+                f"text contains unknown placeholders: {sorted(unknown)} "
+                f"(slot allows: {sorted(allowed) or 'none'})"
+            )
         if "\n" in text:
             errors.append("text contains newline")
 

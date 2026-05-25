@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import random
 import sys
 import time
@@ -148,21 +149,19 @@ def _default_page_match(slot: cfg.Slot) -> dict:
 
 def _context_block(slot: cfg.Slot, page_match: dict) -> str:
     # In v1 we hand Claude a brief paragraph telling it the launch
-    # situation. Once gsc_poller.py is wired, this also includes the
-    # latest GSC top-queries / striking-distance summary. For now,
-    # leave a clear placeholder Claude can act on.
+    # situation. Once gsc_poller.py is populating seo_gsc_daily, this
+    # also includes a latest top-queries / striking-distance summary.
+    site = os.environ.get("GSC_SITE_URL", "your site")
     return f"""
-The site is **average-rent.com**. The launch surface for this slot is
-the `{slot.pattern}` page family. We have just enabled this slot, so
-no GSC variant-level data exists yet; propose variants from first
-principles using the rubric.
+The site is **{site}**. The launch surface for this slot is the
+`{slot.pattern}` page family. We have just enabled this slot, so no
+GSC variant-level data exists yet; propose variants from first
+principles using the rubric in `seo_best_practices.md`.
 
-If you want recent traffic data, call `mcp__analytics-mcp__run_report`
-ONCE with `dimensions=['pagePath']`, `metrics=['screenPageViews',
-'engagementRate','averageSessionDuration']`, and a `pagePath` filter
-matching `/city/.*/{slot.pattern.replace('_', '/')}/?$` if your
-analytics MCP supports regex; otherwise use the literal path
-`/city/austin-tx/apartments/` (Austin is our best-data city).
+If you want recent traffic data, the optimizer host has the cached
+OAuth token at $GSC_OAUTH_TOKEN_FILE; you can spawn a child shell to
+run `python -m seo_agent.ga4_client --sample` for a quick check, or
+read from the `seo_gsc_daily` D1 table once it has rows.
 """.strip()
 
 

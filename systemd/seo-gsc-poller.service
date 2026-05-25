@@ -6,11 +6,20 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=ubuntu
-WorkingDirectory=/home/ubuntu/vibe-seo-agent
-EnvironmentFile=/home/ubuntu/vibe-seo-agent/.env
-ExecStart=/home/ubuntu/vibe-seo-agent/.venv/bin/python -m seo_agent.gsc_poller --days 7
+WorkingDirectory=/home/ubuntu/seo-agent
+EnvironmentFile=/home/ubuntu/seo-agent/.env
+# PYTHONPATH must be explicit — CWD-on-sys.path doesn't always apply
+# when systemd spawns python -m. install_vps.sh patches this if your
+# project dir is not /home/ubuntu/seo-agent.
+Environment=PYTHONPATH=/home/ubuntu/seo-agent
+Environment=PYTHONUNBUFFERED=1
+# PATH must include ~/.local/bin where Claude Code lives (if you use
+# plan auth — the poller itself doesn't need claude, but kept for
+# parity with seo-agent.service).
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ubuntu/seo-agent/seo_agent/.venv/bin/python -m seo_agent.gsc_poller --days 7
 StandardOutput=journal
 StandardError=journal
-# Quotas — be a good neighbor on a shared VPS
+# Be a good neighbor on a shared VPS
 MemoryMax=512M
 CPUQuota=50%

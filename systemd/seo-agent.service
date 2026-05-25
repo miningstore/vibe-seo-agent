@@ -6,15 +6,27 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/vibe-seo-agent
-EnvironmentFile=/home/ubuntu/vibe-seo-agent/.env
-ExecStart=/home/ubuntu/vibe-seo-agent/.venv/bin/python -m seo_agent.loop
+WorkingDirectory=/home/ubuntu/seo-agent
+EnvironmentFile=/home/ubuntu/seo-agent/.env
+# PYTHONPATH must be explicit — CWD-on-sys.path doesn't always apply
+# when systemd spawns python -m. install_vps.sh patches this if your
+# project dir is not /home/ubuntu/seo-agent.
+Environment=PYTHONPATH=/home/ubuntu/seo-agent
+Environment=PYTHONUNBUFFERED=1
+# PATH MUST include ~/.local/bin so the subprocess can find `claude`.
+# Auth is via ~/.claude/.credentials.json (your Claude Pro/Max plan).
+# Do NOT set ANTHROPIC_API_KEY in .env unless you specifically want to
+# bypass plan auth and pay per-token. Do NOT add --bare to claude CLI
+# args in the loop — that flag explicitly disables plan auth.
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/ubuntu/seo-agent/seo_agent/.venv/bin/python -m seo_agent.loop
 Restart=on-failure
 RestartSec=300
-Environment=PYTHONUNBUFFERED=1
-Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
 StandardOutput=journal
 StandardError=journal
+# Generous quotas — the Claude session is the heaviest part of each
+# tick, and concurrency is capped via the loop's own cooldown gates,
+# not via systemd.
 CPUQuota=400%
 MemoryMax=8G
 

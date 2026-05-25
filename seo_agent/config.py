@@ -63,6 +63,13 @@ class Slot:
     min_len: int = 0
     max_len: int = 0
     banned_tokens: tuple[str, ...] = field(default_factory=tuple)
+    # Whitelisted template placeholders the variant may contain. The
+    # page template substitutes these at render time. Required for slots
+    # whose `page_match` is empty `{}` (i.e. variant applies to all
+    # pages under a pattern, so per-page values must be templated).
+    # Each entry is the bare name without braces, e.g. ("city",) means
+    # `{city}` is allowed.
+    template_vars: tuple[str, ...] = field(default_factory=tuple)
 
 
 # === EDIT BELOW: tokens that may never appear in your variants ===
