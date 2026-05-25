@@ -49,6 +49,13 @@ PROMOTE_MIN_IMPRESSIONS = 5000
 PROMOTE_MIN_DAYS = 14
 PROMOTE_BEATS_PROB = 0.95     # > 95% chance of beating → promote
 
+# Stale-variant cleanup. A variant generated 30+ days ago that has
+# fewer than 100 impressions is effectively dead — bandit-starved or
+# targeting a page with no traffic. Kill it so the active pool stays
+# clean and MAX_ACTIVE_VARIANTS_PER_SLOT actually reflects live arms.
+STALE_KILL_MIN_AGE_DAYS = int(os.environ.get("SEO_STALE_KILL_MIN_AGE_DAYS", "30"))
+STALE_KILL_MAX_IMPRESSIONS = int(os.environ.get("SEO_STALE_KILL_MAX_IMPRESSIONS", "100"))
+
 
 SlotKind = Literal["text", "faq", "schema"]
 

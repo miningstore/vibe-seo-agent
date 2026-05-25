@@ -47,7 +47,13 @@ def _headers() -> dict[str, str]:
 def query(sql: str, params: list[Any] | None = None) -> list[dict]:
     """Run a parameterized SELECT or DML. Returns rows for SELECTs,
     empty list for INSERT/UPDATE/DELETE.
+
+    Retries on 429 + 5xx with exponential backoff + random jitter so
+    concurrent agents on the same VPS don't retry in lockstep against
+    the same D1 outage. Jitter is 0-500ms on top of the 2**attempt
+    base (1s, 2s, 4s).
     """
+    import random
     body = {"sql": sql, "params": params or []}
     for attempt in range(3):
         resp = requests.post(_endpoint(), json=body, headers=_headers(), timeout=30)
@@ -62,7 +68,7 @@ def query(sql: str, params: list[Any] | None = None) -> list[dict]:
             rows = results[0].get("results", [])
             return rows or []
         if resp.status_code in (429, 500, 502, 503, 504) and attempt < 2:
-            time.sleep(2 ** attempt)
+            time.sleep(2 ** attempt + random.uniform(0, 0.5))
             continue
         raise D1Error(f"D1 HTTP {resp.status_code}: {resp.text[:500]}")
     raise D1Error("D1 query exhausted retries")

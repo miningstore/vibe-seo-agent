@@ -308,12 +308,29 @@ def _apply_kill_promote(slot: cfg.Slot) -> None:
     for s in stats:
         if s.variant_id == champion.variant_id or s.status != "active":
             continue
+        age_days = _age_days(s.created_at)
+
+        # Stale-variant kill rule. If a variant is more than 30 days old
+        # AND has fewer than 100 impressions, it's effectively dead — the
+        # bandit's deprioritization has starved it, OR it was generated
+        # for a page Google never crawled, OR the slot's page-pattern
+        # matches no traffic. Kill it to keep the active pool clean and
+        # let the loop propose fresher copy. Without this rule, dead
+        # variants accumulate as cruft and silently shrink the bandit's
+        # effective arm count under MAX_ACTIVE_VARIANTS_PER_SLOT.
+        if age_days >= cfg.STALE_KILL_MIN_AGE_DAYS and s.impressions < cfg.STALE_KILL_MAX_IMPRESSIONS:
+            _set_status(s.variant_id, "killed")
+            log.info(
+                "killed stale variant_id=%d age=%.1fd impressions=%d (under-served, cleaning up)",
+                s.variant_id, age_days, s.impressions,
+            )
+            continue
+
         p_beat = allocator.prob_beats_champion(s, champion)
         if s.impressions >= cfg.KILL_MIN_IMPRESSIONS and p_beat < cfg.KILL_BEATS_PROB:
             _set_status(s.variant_id, "killed")
             log.info("killed variant_id=%d p_beat=%.3f", s.variant_id, p_beat)
             continue
-        age_days = _age_days(s.created_at)
         if (
             s.impressions >= cfg.PROMOTE_MIN_IMPRESSIONS
             and age_days >= cfg.PROMOTE_MIN_DAYS
