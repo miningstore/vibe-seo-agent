@@ -76,6 +76,11 @@ class Slot:
 # Common bans worth keeping: em/en dashes (look LLM-y in copy);
 # competitor brand names; phrases that imply data source mechanics
 # (e.g. "scraped"); legal/regulatory red flags.
+#
+# OVERRIDE: if you create `seo_agent/site_config.py` with HOUSE_STYLE_BANNED
+# and/or SLOTS module-level constants, those take precedence over the
+# defaults below. This lets you customize per-project without diverging
+# the upstream template. See docs/03-CUSTOMIZING.md.
 HOUSE_STYLE_BANNED = (
     "—", "–",          # em dash, en dash
     # Add competitor names, internal jargon, banned phrases here:
@@ -120,6 +125,21 @@ SLOTS: list[Slot] = [
 ]
 
 
+# Per-project overlay. If `seo_agent/site_config.py` exists with module-
+# level `SLOTS` and/or `HOUSE_STYLE_BANNED` and/or `PAGE_MATCH`, those
+# take precedence. This lets you customize without diverging the
+# upstream template — pull template updates without merging your slots.
+try:
+    from . import site_config as _site  # type: ignore
+    if hasattr(_site, "SLOTS"):
+        SLOTS = _site.SLOTS  # noqa: F811
+    if hasattr(_site, "HOUSE_STYLE_BANNED"):
+        HOUSE_STYLE_BANNED = _site.HOUSE_STYLE_BANNED  # noqa: F811
+    PAGE_MATCH: dict[str, dict] = getattr(_site, "PAGE_MATCH", {})
+except ImportError:
+    PAGE_MATCH = {}
+
+
 def enabled_slots() -> list[Slot]:
     return [s for s in SLOTS if s.enabled]
 
@@ -129,6 +149,12 @@ def get_slot(name: str) -> Slot | None:
         if s.name == name:
             return s
     return None
+
+
+def page_match_for(slot_name: str) -> dict:
+    """Look up the per-slot page_match predicate from site_config.PAGE_MATCH.
+    Defaults to {} (match every page under the slot's pattern)."""
+    return PAGE_MATCH.get(slot_name, {})
 
 
 # === Runtime env vars (all set in .env, loaded by systemd) ===

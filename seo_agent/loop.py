@@ -140,9 +140,10 @@ def _pick_target(commit: bool) -> tuple[cfg.Slot, dict] | None:
 
 
 def _default_page_match(slot: cfg.Slot) -> dict:
-    # Launch all slots globally (empty page_match). Per-city targeting
-    # comes later once we have GSC data confirming city-level variance.
-    return {}
+    # Look up the slot's page_match from site_config.PAGE_MATCH (set
+    # per-project), falling back to {} which means "every page matching
+    # the slot's pattern". Per-page targeting is set in site_config.PAGE_MATCH.
+    return cfg.page_match_for(slot.name)
 
 
 # --- Context block ------------------------------------------------------

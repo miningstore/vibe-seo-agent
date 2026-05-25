@@ -8,11 +8,40 @@ choices that depend on your stack.
 | File | What |
 |---|---|
 | `.env` | site URL, GA4 property, CF credentials |
-| `seo_agent/config.py` | SLOTS (what copy to vary), HOUSE_STYLE_BANNED |
+| `seo_agent/site_config.py` | SLOTS, HOUSE_STYLE_BANNED, PAGE_MATCH for YOUR project (overlay — see below) |
 | `seo_agent/prompts/variant_generator.md` | rules the LLM follows when proposing variants |
 | `seo_agent/prompts/seo_best_practices.md` | your SEO rubric (mine from your audits / Ahrefs / etc.) |
 | `<your-site>/middleware.*` | hook the variant lookup into render (see Astro example) |
 | `<your-site>/migrations/*.sql` | add the 4 seo_* tables to your DB |
+
+## The overlay pattern (don't fight template updates)
+
+DON'T edit `seo_agent/config.py` directly. That file ships with the
+template and you'll lose your edits the next time you `git pull`.
+
+INSTEAD, create `seo_agent/site_config.py` from the example:
+
+```bash
+cp seo_agent/site_config.example.py seo_agent/site_config.py
+$EDITOR seo_agent/site_config.py
+```
+
+`site_config.py` is gitignored. Whatever module-level constants you
+define there (`SLOTS`, `HOUSE_STYLE_BANNED`, `PAGE_MATCH`) override the
+defaults from the template's `config.py`. You can pull template
+updates from upstream without merging your per-project knobs.
+
+`PAGE_MATCH` is a dict mapping slot name to a page-match predicate.
+Useful when one slot targets one specific URL (common on static sites
+where you're optimizing a known page):
+
+```python
+PAGE_MATCH = {
+    "home.title":       {"path": "/"},
+    "pricing.title":    {"path": "/pricing/"},
+    "blog_post.title":  {"path_prefix": "/blog/"},   # if your middleware supports prefix matching
+}
+```
 
 ## Template placeholders (the cross-page trick)
 

@@ -26,3 +26,9 @@ seo_agent/scratch/
 seo_agent/metrics/spending.json
 seo_agent/metrics/history.jsonl
 seo_agent/metrics/baseline.json
+
+# Per-project overlay — your SLOTS, HOUSE_STYLE_BANNED, PAGE_MATCH live here
+# so template updates don't fight with your customizations. Each project
+# clones the template and writes its own site_config.py. The template
+# ships a site_config.example.py for reference.
+seo_agent/site_config.py
