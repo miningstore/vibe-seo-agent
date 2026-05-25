@@ -32,3 +32,4 @@ seo_agent/metrics/baseline.json
 # clones the template and writes its own site_config.py. The template
 # ships a site_config.example.py for reference.
 seo_agent/site_config.py
+examples/*/node_modules/

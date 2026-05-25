@@ -1,0 +1,37 @@
+# vibe-seo-worker — wrangler config template
+#
+# Copy this into your site repo (e.g. as `wrangler.seo-worker.toml`)
+# and customize before deploying.
+
+name = "vibe-seo-worker"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+
+# account_id is the Miningstore account (or whichever Cloudflare account
+# owns the D1 database). Find via `npx wrangler whoami`.
+# account_id = "899a5d2f3fed7a9888b84b3cb2e9f34f"
+
+# Where the static site lives. The Worker fetches from here and rewrites
+# the HTML before returning to the browser. Use your *.pages.dev hostname
+# OR your direct Pages alias — NOT the public domain (that would loop).
+[vars]
+ORIGIN = "your-site.pages.dev"
+SEO_OPTIMIZER_ENABLED = "true"
+
+# D1 database — same schema as examples/astro-cloudflare/migrations/.
+# Apply the migration to this DB before deploying the Worker.
+[[d1_databases]]
+binding = "DB"
+database_name = "your-site-seo-db"
+database_id = "<paste-uuid-from-wrangler-d1-create>"
+
+# Route the Worker in front of your public domain. Wildcard catches
+# every path. CF resolves this to the Worker first, then falls through
+# to Pages if the Worker decides to passthrough.
+#
+# Set this AFTER you've deployed once and verified the Worker is healthy.
+# Going live without testing can take your site down.
+#
+# [[routes]]
+# pattern = "miningstore.com/*"
+# zone_name = "miningstore.com"

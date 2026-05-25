@@ -1,0 +1,17 @@
+{
+  "name": "vibe-seo-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Edge A/B for static sites on Cloudflare Pages via HTMLRewriter",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "deploy:dryrun": "wrangler deploy --dry-run --outdir dist",
+    "tail": "wrangler tail",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240501.0",
+    "typescript": "^5.3.0",
+    "wrangler": "^3.50.0"
+  }
+}
