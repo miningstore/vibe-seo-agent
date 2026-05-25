@@ -37,11 +37,18 @@ class VariantStats:
     impressions: int
     rewards_sum: float
     created_at: str
+    # Timestamp of the last posterior update. Used by the loop to
+    # request engagement_score_d1 with `since=` for incremental
+    # accounting (so each tick adds only NEW data, not the full
+    # rolling window re-counted). Falls back to created_at when the
+    # variant has never been ticked.
+    posterior_updated_at: str = ""
 
 
 def load_variant_stats(slot: str) -> list[VariantStats]:
     rows = d1_client.query(
-        """SELECT id, slot, page_match, status, alpha, beta, impressions, rewards_sum, created_at
+        """SELECT id, slot, page_match, status, alpha, beta, impressions, rewards_sum,
+                  created_at, COALESCE(posterior_updated_at, created_at) AS posterior_updated_at
            FROM seo_variants WHERE slot = ?1 AND status IN ('active','champion')""",
         [slot],
     )
@@ -56,6 +63,7 @@ def load_variant_stats(slot: str) -> list[VariantStats]:
             impressions=int(r["impressions"]),
             rewards_sum=float(r["rewards_sum"]),
             created_at=r["created_at"],
+            posterior_updated_at=r["posterior_updated_at"] or r["created_at"],
         )
         for r in rows
     ]
@@ -78,46 +86,67 @@ def engagement_score_d1(
     variant_id: int,
     hours: int = 24,
     slot: "cfg.Slot | None" = None,
+    since: str | None = None,
 ) -> tuple[int, float]:
-    """Return (impressions, weighted_reward_sum) over the last N hours.
+    """Return (impressions, weighted_reward_sum) over a window.
+
+    Two windowing modes:
+
+    - `since=<iso-timestamp>` (incremental, used by the loop): count
+      only rows newer than the given timestamp. The loop passes each
+      variant's `posterior_updated_at` here, then update_posterior
+      bumps that timestamp to now(). This is what prevents the
+      "every-tick re-counts the last 24h" overcounting bug.
+
+    - `since=None` + `hours=N` (rolling window, used for ad-hoc
+      reports / health checks): count rows in the last N hours. Same
+      semantics as the original implementation.
 
     Per-event weights default to DEFAULT_WEIGHTS. When `slot.goal_event`
     is set, the goal event gets `slot.goal_weight` (default 5.0) so
     conversions dominate the reward signal once they start flowing.
-    Pass `slot=None` for callers that don't know which slot they're
-    scoring (falls back to engagement-only weights).
 
     Impression source: seo_assignments, NOT view events. SSR sites
     (average-rent) get a `view` row per pageload via the in-page
     tracker; static sites (miningstore) only get a single assignment
-    row when the Worker first sees a session. Using assignments means
-    the impression count works for both — SSR sites lose a little
-    accuracy on repeat visits (one assignment row per
-    session/slot/path regardless of repeat views), static sites get
-    the right count instead of zero. Both keep their reward signal
-    intact (engagement events still get their weights from
-    DEFAULT_WEIGHTS).
+    row when the Worker first sees a session. Assignments work for
+    both — and they're the bandit's natural impression unit
+    (one cookie shown one variant = one trial).
     """
-    imp_rows = d1_client.query(
-        """SELECT COUNT(*) AS n FROM seo_assignments
-           WHERE variant_id = ?1
-             AND assigned_at > datetime('now', '-' || ?2 || ' hours')""",
-        [variant_id, hours],
-    )
+    if since:
+        imp_sql = (
+            "SELECT COUNT(*) AS n FROM seo_assignments "
+            "WHERE variant_id = ?1 AND assigned_at > ?2"
+        )
+        out_sql = (
+            "SELECT event, COUNT(*) AS n FROM seo_outcomes "
+            "WHERE variant_id = ?1 AND recorded_at > ?2 GROUP BY event"
+        )
+        imp_params = [variant_id, since]
+        out_params = [variant_id, since]
+    else:
+        imp_sql = (
+            "SELECT COUNT(*) AS n FROM seo_assignments "
+            "WHERE variant_id = ?1 "
+            "AND assigned_at > datetime('now', '-' || ?2 || ' hours')"
+        )
+        out_sql = (
+            "SELECT event, COUNT(*) AS n FROM seo_outcomes "
+            "WHERE variant_id = ?1 "
+            "AND recorded_at > datetime('now', '-' || ?2 || ' hours') "
+            "GROUP BY event"
+        )
+        imp_params = [variant_id, hours]
+        out_params = [variant_id, hours]
+
+    imp_rows = d1_client.query(imp_sql, imp_params)
     impressions = int(imp_rows[0]["n"]) if imp_rows else 0
 
     weights = dict(DEFAULT_WEIGHTS)
     if slot is not None and getattr(slot, "goal_event", ""):
         weights[slot.goal_event] = float(getattr(slot, "goal_weight", 5.0))
 
-    out_rows = d1_client.query(
-        """SELECT event, COUNT(*) AS n
-           FROM seo_outcomes
-           WHERE variant_id = ?1
-             AND recorded_at > datetime('now', '-' || ?2 || ' hours')
-           GROUP BY event""",
-        [variant_id, hours],
-    )
+    out_rows = d1_client.query(out_sql, out_params)
     reward = 0.0
     for r in out_rows:
         n = int(r["n"])
@@ -126,25 +155,48 @@ def engagement_score_d1(
     return impressions, reward
 
 
-def update_posterior(variant_id: int, new_impressions: int, new_reward: float) -> None:
+def update_posterior(
+    variant_id: int,
+    new_impressions: int,
+    new_reward: float,
+    bump_timestamp: bool = True,
+) -> None:
     """Incrementally apply (impressions, reward) to a variant's Beta posterior.
 
     We treat reward as a fractional positive-event count: 1 unit of
     reward = 1 unit of alpha bump, the rest of the impressions go to
     beta. Clamped to non-negative.
+
+    When `bump_timestamp=True` (default, used by the loop), the variant's
+    `posterior_updated_at` is set to now() in the same UPDATE so the
+    next tick's `engagement_score_d1(since=...)` only counts events
+    that arrived after this update. Set to False for ad-hoc updates
+    where you don't want to shift the incremental cursor.
     """
     if new_impressions <= 0:
         return
     reward_clamped = max(0.0, min(float(new_impressions), new_reward))
-    d1_client.query(
-        """UPDATE seo_variants
-           SET impressions = impressions + ?2,
-               rewards_sum = rewards_sum + ?3,
-               alpha = alpha + ?3,
-               beta = beta + (?2 - ?3)
-           WHERE id = ?1""",
-        [variant_id, new_impressions, reward_clamped],
-    )
+    if bump_timestamp:
+        d1_client.query(
+            """UPDATE seo_variants
+               SET impressions = impressions + ?2,
+                   rewards_sum = rewards_sum + ?3,
+                   alpha = alpha + ?3,
+                   beta = beta + (?2 - ?3),
+                   posterior_updated_at = datetime('now')
+               WHERE id = ?1""",
+            [variant_id, new_impressions, reward_clamped],
+        )
+    else:
+        d1_client.query(
+            """UPDATE seo_variants
+               SET impressions = impressions + ?2,
+                   rewards_sum = rewards_sum + ?3,
+                   alpha = alpha + ?3,
+                   beta = beta + (?2 - ?3)
+               WHERE id = ?1""",
+            [variant_id, new_impressions, reward_clamped],
+        )
 
 
 def prob_beats_champion(variant: VariantStats, champion: VariantStats, samples: int = 4000) -> float:

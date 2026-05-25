@@ -270,9 +270,23 @@ def _load_champion(slot: cfg.Slot, page_match: dict) -> dict | None:
 
 
 def _update_posteriors_for_slot(slot: cfg.Slot) -> None:
+    """Incrementally update Beta posteriors for every active/champion
+    variant in the slot. Each variant is updated with ONLY the events
+    that arrived since its `posterior_updated_at` timestamp — which
+    update_posterior then bumps to now() in the same row update.
+
+    This fixes the pre-Phase-2.1 overcounting bug where every 10-min
+    tick added the FULL last-24h aggregate to alpha/beta, inflating
+    posteriors by ~144x/day and collapsing Thompson sampling to
+    greedy exploitation.
+    """
     stats = allocator.load_variant_stats(slot.name)
     for s in stats:
-        imps, reward = allocator.engagement_score_d1(s.variant_id, hours=24, slot=slot)
+        imps, reward = allocator.engagement_score_d1(
+            s.variant_id,
+            slot=slot,
+            since=s.posterior_updated_at,
+        )
         if imps > 0:
             allocator.update_posterior(s.variant_id, imps, reward)
 
