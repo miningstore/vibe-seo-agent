@@ -70,6 +70,12 @@ def poll(days: int = 7, attribute: bool = True) -> int:
             start_date=start.isoformat(),
             end_date=end.isoformat(),
         )
+    except gsc_client.OAuthRevokedError as e:
+        # Headless OAuth failure — log clearly so ops can see it in the
+        # journal without a stacktrace, and exit clean so systemd
+        # doesn't restart-loop the timer service.
+        log.error("OAuth revoked/missing — skipping this run.\n%s", e)
+        return 0
     except Exception as e:
         log.error("GSC fetch failed: %s", e)
         return 0

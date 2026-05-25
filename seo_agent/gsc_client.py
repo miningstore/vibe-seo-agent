@@ -38,6 +38,16 @@ from typing import Iterable
 
 log = logging.getLogger("seo_agent.gsc_client")
 
+
+class OAuthRevokedError(RuntimeError):
+    """OAuth token is missing, revoked, or has insufficient scopes, AND
+    we're running headless (no browser available for re-consent).
+    Callers that should fail gracefully (nightly pollers, mailer)
+    catch this and skip the run with a clear log line; callers that
+    NEED valid credentials (the agent loop) let it propagate.
+    """
+    pass
+
 # Scopes the bootstrap requests. We ask for both Search Console and GA4
 # read access at once so a single OAuth flow + cached token covers
 # everything the optimizer needs. Google's docs recommend bundling
@@ -93,11 +103,17 @@ def _load_oauth_creds(interactive: bool):
 
     if needs_consent:
         if not interactive:
-            raise RuntimeError(
-                f"No usable OAuth token at {token_path}. "
-                "Run on a machine with a browser:\n"
+            # Headless path (VPS pollers, mailer, etc.) — we can't open a
+            # browser here. Raise OAuthRevokedError so the caller can
+            # decide whether to skip this run gracefully vs. crash. The
+            # GSC poller / conversion poller / mailer all catch this and
+            # log a clear message instead of crashing with a stacktrace.
+            raise OAuthRevokedError(
+                f"OAuth token at {token_path} is invalid / revoked / "
+                "missing required scopes. Cannot refresh headlessly.\n"
+                "Fix: on a machine with a browser, run\n"
                 "  python -m seo_agent.gsc_client --bootstrap\n"
-                f"Then copy {token_path} to this host."
+                f"then `scp {token_path} <vps>:<path>` to redeploy."
             )
         from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore
 

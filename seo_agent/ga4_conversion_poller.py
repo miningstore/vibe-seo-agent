@@ -216,7 +216,15 @@ def poll(days: int = 1, dry_run: bool = False) -> int:
         log.error("GA4_PROPERTY_ID not set")
         return 0
 
-    rows = fetch_conversion_events(property_id, days=days, goal_events=goal_events)
+    from . import gsc_client as _gsc  # imported here so the module top doesn't pay the cost on dry-run
+    try:
+        rows = fetch_conversion_events(property_id, days=days, goal_events=goal_events)
+    except _gsc.OAuthRevokedError as e:
+        log.error("OAuth revoked/missing — skipping conversion poll.\n%s", e)
+        return 0
+    except Exception as e:
+        log.error("GA4 conversion fetch failed: %s", e)
+        return 0
     log.info("fetched %d GA4 conversion-event rows over %d days", len(rows), days)
     return attribute_and_write(rows, dry_run=dry_run)
 

@@ -91,7 +91,10 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (mintedSessionId) {
     response.headers.append(
       'Set-Cookie',
-      `_arx=${mintedSessionId}; Path=/; Max-Age=7776000; SameSite=Lax`,
+      // Secure flag required: the middleware only runs over HTTPS in
+      // production, and without Secure the cookie could leak under a
+      // forced-HTTP downgrade. SameSite=Lax alone doesn't prevent that.
+      `_arx=${mintedSessionId}; Path=/; Max-Age=7776000; SameSite=Lax; Secure`,
     );
   }
 

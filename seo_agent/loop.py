@@ -67,7 +67,7 @@ def _spend_today_usd() -> float:
         data = json.loads(path.read_text())
     except json.JSONDecodeError:
         return 0.0
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     return float(data.get(today, 0.0))
 
 
@@ -80,7 +80,7 @@ def _record_spend(amount: float) -> None:
             data = json.loads(path.read_text())
         except json.JSONDecodeError:
             data = {}
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     data[today] = float(data.get(today, 0.0)) + amount
     path.write_text(json.dumps(data, indent=2))
 
@@ -89,7 +89,7 @@ def _variants_today() -> int:
     path = cfg.METRICS_DIR / "history.jsonl"
     if not path.exists():
         return 0
-    today = datetime.utcnow().date().isoformat()
+    today = datetime.now(timezone.utc).date().isoformat()
     n = 0
     with path.open() as f:
         for line in f:

@@ -93,7 +93,11 @@ export default {
     let mintedCookie: string | null = null;
     if (!sessionId && !isBot) {
       sessionId = crypto.randomUUID();
-      mintedCookie = `_arx=${sessionId}; Path=/; Max-Age=7776000; SameSite=Lax`;
+      // Secure flag required even though both target sites are HTTPS-only;
+      // without it the cookie can leak over a forced-HTTP downgrade. SameSite=Lax
+      // alone doesn't prevent that. The Worker only runs for HTTPS requests so
+      // setting Secure here never blocks a legitimate first set.
+      mintedCookie = `_arx=${sessionId}; Path=/; Max-Age=7776000; SameSite=Lax; Secure`;
     }
 
     // Resolve variants for this path.
