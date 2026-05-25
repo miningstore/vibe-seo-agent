@@ -114,13 +114,24 @@ def engagement_score_d1(
     (one cookie shown one variant = one trial).
     """
     if since:
+        # Wrap both sides in datetime() so SQLite normalizes the format
+        # comparison. assigned_at / recorded_at are ISO 8601 written by
+        # the Worker / Astro middleware (`new Date().toISOString()` =
+        # 2026-05-25T17:59:12.348Z); `posterior_updated_at` is written
+        # by `datetime('now')` (= 2026-05-25 17:59:12). Raw string
+        # comparison treats 'T' > ' ' (ASCII 84 vs 32), so Worker
+        # timestamps always test as greater than SQL cursor timestamps
+        # regardless of actual time — cursor never advances. datetime()
+        # on both sides parses to SQLite's internal format and
+        # compares correctly.
         imp_sql = (
             "SELECT COUNT(*) AS n FROM seo_assignments "
-            "WHERE variant_id = ?1 AND assigned_at > ?2"
+            "WHERE variant_id = ?1 AND datetime(assigned_at) > datetime(?2)"
         )
         out_sql = (
             "SELECT event, COUNT(*) AS n FROM seo_outcomes "
-            "WHERE variant_id = ?1 AND recorded_at > ?2 GROUP BY event"
+            "WHERE variant_id = ?1 AND datetime(recorded_at) > datetime(?2) "
+            "GROUP BY event"
         )
         imp_params = [variant_id, since]
         out_params = [variant_id, since]
@@ -177,13 +188,18 @@ def update_posterior(
         return
     reward_clamped = max(0.0, min(float(new_impressions), new_reward))
     if bump_timestamp:
+        # strftime ISO format matches `new Date().toISOString()` used by
+        # the Worker and Astro middleware (2026-05-25T17:59:12.348Z) so
+        # the cursor compares cleanly against assigned_at / recorded_at
+        # under both the datetime()-normalized path in engagement_score_d1
+        # AND any future raw-string comparison.
         d1_client.query(
             """UPDATE seo_variants
                SET impressions = impressions + ?2,
                    rewards_sum = rewards_sum + ?3,
                    alpha = alpha + ?3,
                    beta = beta + (?2 - ?3),
-                   posterior_updated_at = datetime('now')
+                   posterior_updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                WHERE id = ?1""",
             [variant_id, new_impressions, reward_clamped],
         )
