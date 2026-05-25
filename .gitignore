@@ -1,0 +1,28 @@
+# Credentials — NEVER commit
+credentials/*
+!credentials/.gitkeep
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Agent state
+seo_agent/scratch/
+seo_agent/metrics/spending.json
+seo_agent/metrics/history.jsonl
+seo_agent/metrics/baseline.json

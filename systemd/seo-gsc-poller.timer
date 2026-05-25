@@ -1,0 +1,11 @@
+[Unit]
+Description=vibe-seo-agent — schedule nightly GSC poll
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+RandomizedDelaySec=900
+Persistent=true
+Unit=seo-gsc-poller.service
+
+[Install]
+WantedBy=timers.target

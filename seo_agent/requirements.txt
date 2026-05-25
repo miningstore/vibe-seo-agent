@@ -1,0 +1,10 @@
+requests>=2.31
+google-auth>=2.30
+google-api-python-client>=2.130
+# OAuth user flow for GSC + GA4 (Google blocks new SAs on GSC since 2024;
+# we use OAuth user as the single auth path for both).
+google-auth-oauthlib>=1.2
+# GA4 Admin API (list properties) + Data API (run engagement reports).
+# Used by ga4_client.py at runtime.
+google-analytics-admin>=0.22
+google-analytics-data>=0.18

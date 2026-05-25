@@ -1,0 +1,16 @@
+[Unit]
+Description=vibe-seo-agent — nightly GSC poll
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/vibe-seo-agent
+EnvironmentFile=/home/ubuntu/vibe-seo-agent/.env
+ExecStart=/home/ubuntu/vibe-seo-agent/.venv/bin/python -m seo_agent.gsc_poller --days 7
+StandardOutput=journal
+StandardError=journal
+# Quotas — be a good neighbor on a shared VPS
+MemoryMax=512M
+CPUQuota=50%

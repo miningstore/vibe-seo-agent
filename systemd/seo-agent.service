@@ -1,0 +1,22 @@
+[Unit]
+Description=vibe-seo-agent loop (parallel edge A/B + Claude CLI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/vibe-seo-agent
+EnvironmentFile=/home/ubuntu/vibe-seo-agent/.env
+ExecStart=/home/ubuntu/vibe-seo-agent/.venv/bin/python -m seo_agent.loop
+Restart=on-failure
+RestartSec=300
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+StandardOutput=journal
+StandardError=journal
+CPUQuota=400%
+MemoryMax=8G
+
+[Install]
+WantedBy=multi-user.target
