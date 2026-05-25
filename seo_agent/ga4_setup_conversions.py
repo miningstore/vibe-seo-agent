@@ -76,7 +76,8 @@ def main() -> int:
                 parent=parent,
                 custom_dimension=CustomDimension(
                     parameter_name=args.arx_dim,
-                    display_name="SEO Agent session (_arx)",
+                    # GA4 restricts display_name to alphanumeric + space + underscore.
+                    display_name="SEO Agent session arx",
                     description="The _arx cookie value, joined to seo_assignments for variant attribution",
                     scope=CustomDimension.DimensionScope.EVENT,
                 ),
