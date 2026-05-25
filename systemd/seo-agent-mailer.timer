@@ -1,0 +1,14 @@
+[Unit]
+Description=vibe-seo-agent — schedule weekly digest email
+
+[Timer]
+# Monday 09:00 server-local (with a small random jitter).
+# The mailer is idempotent — it skips if it already sent this ISO week —
+# so it's safe if the timer fires more than once per week.
+OnCalendar=Mon *-*-* 09:00:00
+RandomizedDelaySec=600
+Persistent=true
+Unit=seo-agent-mailer.service
+
+[Install]
+WantedBy=timers.target
