@@ -179,7 +179,23 @@ def run_one_tick(commit: bool) -> bool:
 
     target = _pick_target(commit=commit)
     if not target:
-        log.info("no eligible slot under cap; idle")
+        # All slots at MAX_ACTIVE_VARIANTS_PER_SLOT. Without this branch
+        # the kill/posterior path never runs once the slot saturates,
+        # which means weak arms can't die and the loop stays stuck on
+        # 8/8 forever. So when every slot is full, still run the
+        # posterior update + kill-rule pass on each enabled slot — that
+        # lets the bandit reap underperformers and free room for new
+        # proposals on the next tick.
+        if commit:
+            log.info("all slots saturated — running posterior + kill-rule sweep")
+            for slot in cfg.enabled_slots():
+                try:
+                    _update_posteriors_for_slot(slot)
+                    _apply_kill_promote(slot)
+                except Exception as e:
+                    log.warning("sweep failed for %s: %s", slot.name, e)
+        else:
+            log.info("no eligible slot under cap; idle")
         return False
 
     slot, page_match = target
