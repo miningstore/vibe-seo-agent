@@ -43,9 +43,15 @@ MAX_VARIANTS_GENERATED_PER_DAY = int(os.environ.get("SEO_MAX_VARIANTS_PER_DAY", 
 MAX_ACTIVE_VARIANTS_PER_SLOT = int(os.environ.get("SEO_MAX_ACTIVE_PER_SLOT", "8"))
 
 # Eval rules — when do we kill or promote?
-KILL_MIN_IMPRESSIONS = 2000
+# KILL_MIN_IMPRESSIONS dropped from 2000 → 200 to match real-world
+# traffic on the launch sites. At ~5-15 sessions/variant/day, 2000
+# imps takes 4+ months per arm — by which time the data is stale.
+# 200 is enough for Beta(α,β) to differentiate decisively (a variant
+# with 0 reward over 200 imps has P(beats champion) < 1%) without
+# killing arms prematurely.
+KILL_MIN_IMPRESSIONS = int(os.environ.get("SEO_KILL_MIN_IMPRESSIONS", "200"))
 KILL_BEATS_PROB = 0.05        # < 5% chance of beating champion → kill
-PROMOTE_MIN_IMPRESSIONS = 5000
+PROMOTE_MIN_IMPRESSIONS = int(os.environ.get("SEO_PROMOTE_MIN_IMPRESSIONS", "1000"))
 PROMOTE_MIN_DAYS = 14
 PROMOTE_BEATS_PROB = 0.95     # > 95% chance of beating → promote
 
