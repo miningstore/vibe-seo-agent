@@ -33,9 +33,9 @@ ACCEPTED_BRANCH = os.environ.get("SEO_ACCEPTED_BRANCH", "seo-agent/accepted")
 # Rate / spend controls. Conservative on purpose — SEO experimentation
 # is breadth, not speed; we want lots of variants alive at once, not
 # many proposals per hour.
-MIN_COOLDOWN_S = 600          # 10 min between ticks during the day
-NIGHT_COOLDOWN_S = 1800       # 30 min at night
-IDLE_COOLDOWN_S = 3600        # 1 hour when nothing to do
+MIN_COOLDOWN_S = int(os.environ.get("SEO_MIN_COOLDOWN_S", "600"))      # daytime
+NIGHT_COOLDOWN_S = int(os.environ.get("SEO_NIGHT_COOLDOWN_S", "1800")) # 02-06 server-local
+IDLE_COOLDOWN_S = int(os.environ.get("SEO_IDLE_COOLDOWN_S", "3600"))   # nothing to do
 NIGHT_START_HOUR = 2          # operator-local
 NIGHT_END_HOUR = 6
 DAILY_SPEND_CAP_USD = float(os.environ.get("SEO_DAILY_SPEND_CAP_USD", "15.0"))
