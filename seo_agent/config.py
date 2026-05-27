@@ -40,6 +40,9 @@ NIGHT_START_HOUR = 2          # operator-local
 NIGHT_END_HOUR = 6
 DAILY_SPEND_CAP_USD = float(os.environ.get("SEO_DAILY_SPEND_CAP_USD", "15.0"))
 MAX_VARIANTS_GENERATED_PER_DAY = int(os.environ.get("SEO_MAX_VARIANTS_PER_DAY", "60"))
+# Bandit's active-arm count per (slot, page_match). Higher = wider
+# exploration but slower convergence at fixed traffic. Override via
+# SEO_MAX_ACTIVE_PER_SLOT env var when scaling up.
 MAX_ACTIVE_VARIANTS_PER_SLOT = int(os.environ.get("SEO_MAX_ACTIVE_PER_SLOT", "8"))
 
 # Eval rules — when do we kill or promote?
