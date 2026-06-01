@@ -134,9 +134,22 @@ def fetch_conversion_events(
 
 
 def attribute_and_write(rows: list[dict], dry_run: bool = False) -> int:
-    """For each GA4 row, find the matching seo_assignments row by
-    session_id (== arx) AND page_path, then insert one row per event
-    occurrence into seo_outcomes. Returns the number of rows written."""
+    """For each GA4 conversion row, credit every variant the session
+    was ever assigned to on-or-before the conversion date, then insert
+    one row per (variant, session, conversion-date) into seo_outcomes.
+
+    Why session-level (not per-page): conversions almost always happen
+    on a dedicated funnel page (e.g. /contact/) where no variant slots
+    are configured. A strict (session_id, page_path) join therefore
+    drops nearly every real conversion. The visitor's earlier exposure
+    to variants on content pages is what caused the conversion, so the
+    right credit is "every variant this session saw up to today".
+
+    The `assigned_at <= conversion_date` clause prevents back-attributing
+    to assignments minted after the conversion (e.g. a returning user
+    re-rolled into new variants the next day).
+
+    Returns the number of rows written."""
     if not rows:
         return 0
 
@@ -145,24 +158,27 @@ def attribute_and_write(rows: list[dict], dry_run: bool = False) -> int:
     skipped_already_recorded = 0
 
     for r in rows:
-        # Look up the variant assignment(s) for this (arx, page_path).
-        # If the visitor saw multiple slots on this path, we attribute
-        # the conversion to ALL their assigned variants — each gets a
-        # row. This matches how on-page engagement attribution works.
-        assigns = d1_client.query(
-            """SELECT variant_id, slot
-               FROM seo_assignments
-               WHERE session_id = ?1 AND page_path = ?2""",
-            [r["arx"], r["page_path"]],
-        )
-        if not assigns:
-            skipped_no_assignment += 1
-            continue
-
         # Bucket the GA4 date YYYYMMDD into an ISO timestamp at noon UTC.
         # (We don't know the exact event time; GA4's daily aggregation
         # buckets to a date. Noon UTC is a reasonable placeholder.)
         ts = f"{r['date'][:4]}-{r['date'][4:6]}-{r['date'][6:8]}T12:00:00Z"
+        conv_date = ts[:10]  # YYYY-MM-DD
+
+        # Credit every variant this session was assigned to anywhere on
+        # the site on-or-before the conversion date. The on-page tracker
+        # already records engagement events per-page; this poller adds
+        # the conversion signal that GA4 owns (because /contact/ etc.
+        # has no variant slot to fire a client-side event from).
+        assigns = d1_client.query(
+            """SELECT variant_id, slot, page_path
+               FROM seo_assignments
+               WHERE session_id = ?1
+                 AND date(assigned_at) <= date(?2)""",
+            [r["arx"], conv_date],
+        )
+        if not assigns:
+            skipped_no_assignment += 1
+            continue
 
         for a in assigns:
             # Idempotency: skip if we've already recorded a conversion
@@ -184,17 +200,22 @@ def attribute_and_write(rows: list[dict], dry_run: bool = False) -> int:
 
             if dry_run:
                 log.info(
-                    "DRY: would write %s for variant_id=%s session=%s page=%s",
-                    r["event_name"], a["variant_id"], r["arx"][:8], r["page_path"],
+                    "DRY: would write %s for variant_id=%s session=%s slot_page=%s (converted_on=%s)",
+                    r["event_name"], a["variant_id"], r["arx"][:8],
+                    a["page_path"], r["page_path"],
                 )
                 written += 1
                 continue
 
+            # page_path stored in seo_outcomes is the page where the
+            # variant was SHOWN, not the page where the conversion
+            # happened. This matches how on-page engagement outcomes
+            # are recorded and keeps slot/page semantics consistent.
             d1_client.query(
                 """INSERT INTO seo_outcomes
                    (session_id, variant_id, page_path, event, value, recorded_at, referrer_host)
                    VALUES (?1, ?2, ?3, ?4, 1.0, ?5, 'ga4')""",
-                [r["arx"], a["variant_id"], r["page_path"], r["event_name"], ts],
+                [r["arx"], a["variant_id"], a["page_path"], r["event_name"], ts],
             )
             written += 1
 
