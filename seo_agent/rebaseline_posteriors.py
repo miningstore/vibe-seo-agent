@@ -48,7 +48,13 @@ def rebaseline(since: str, apply: bool) -> int:
         return 0
 
     mode = getattr(cfg, "SEO_IMPRESSION_MODE", "engaged")
-    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%fZ")
+    # isoformat() (matches how insert_variant writes created_at) — a valid,
+    # SQLite-datetime()-parseable timestamp. Do NOT use
+    # strftime('%Y-%m-%dT%H:%M:%fZ'): in Python %f is microseconds-only (no
+    # %S), so it yields an invalid '...T19:13:477233Z' that datetime() can't
+    # parse, which would freeze every re-baselined variant's incremental
+    # cursor. (SQLite's strftime %f means SS.SSS, hence the mismatch.)
+    now_iso = datetime.now(timezone.utc).isoformat()
     print(
         f"re-baselining {len(rows)} variants onto epoch >= {since} "
         f"(impression mode={mode}, apply={apply})\n"
