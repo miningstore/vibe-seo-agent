@@ -136,15 +136,25 @@ def engagement_score_d1(
         imp_params = [variant_id, since]
         out_params = [variant_id, since]
     else:
+        # Wrap assigned_at / recorded_at in datetime() for the SAME reason
+        # the since= branch above does: those columns are ISO-8601 strings
+        # written by the Worker / Astro middleware (`new Date().toISOString()`
+        # = 2026-05-25T17:59:12.348Z) while datetime('now', ...) renders the
+        # space-separated form (2026-05-25 17:59:12). A raw string compare
+        # treats 'T' (ASCII 84) > ' ' (ASCII 32) at index 10, so every row
+        # whose date-portion equals the cutoff day tests as "in window"
+        # regardless of its time-of-day — silently over-counting up to a
+        # full extra day of impressions/outcomes at the window boundary.
+        # datetime() on both sides normalizes the comparison.
         imp_sql = (
             "SELECT COUNT(*) AS n FROM seo_assignments "
             "WHERE variant_id = ?1 "
-            "AND assigned_at > datetime('now', '-' || ?2 || ' hours')"
+            "AND datetime(assigned_at) > datetime('now', '-' || ?2 || ' hours')"
         )
         out_sql = (
             "SELECT event, COUNT(*) AS n FROM seo_outcomes "
             "WHERE variant_id = ?1 "
-            "AND recorded_at > datetime('now', '-' || ?2 || ' hours') "
+            "AND datetime(recorded_at) > datetime('now', '-' || ?2 || ' hours') "
             "GROUP BY event"
         )
         imp_params = [variant_id, hours]

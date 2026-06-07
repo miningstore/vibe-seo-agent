@@ -356,6 +356,14 @@ def _apply_kill_promote(slot: cfg.Slot) -> None:
             _promote(s.variant_id)
             log.info("promoted variant_id=%d p_beat=%.3f age=%.1fd",
                      s.variant_id, p_beat, age_days)
+            # Promote at most ONE arm per sweep. `champion`/`p_beat` for the
+            # remaining arms were computed against the OLD champion; if a
+            # second arm also cleared the bar we'd demote the winner we just
+            # promoted (set it to 'paused') and crown a possibly-weaker arm.
+            # Return so the next tick re-loads stats and re-evaluates every
+            # surviving arm against the NEW champion. Mirrors the
+            # no-champion branch above, which also returns after promoting.
+            return
 
 
 def _set_status(variant_id: int, status: str) -> None:

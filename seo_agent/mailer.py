@@ -180,7 +180,7 @@ def _gather_metrics() -> dict:
         sess_rows = d1_client.query(
             """SELECT COUNT(*) AS n FROM seo_assignments
                WHERE variant_id = ?1
-                 AND assigned_at >= datetime('now', '-7 days')""",
+                 AND datetime(assigned_at) >= datetime('now', '-7 days')""",
             [s["id"]],
         )
         s["sessions_7d"] = int(sess_rows[0]["n"]) if sess_rows else 0
@@ -189,7 +189,7 @@ def _gather_metrics() -> dict:
                 """SELECT COUNT(*) AS n FROM seo_outcomes
                    WHERE variant_id = ?1
                      AND event = ?2
-                     AND recorded_at >= datetime('now', '-7 days')""",
+                     AND datetime(recorded_at) >= datetime('now', '-7 days')""",
                 [s["id"], ge],
             )
             s["conversions"] = int(crows[0]["n"]) if crows else 0
@@ -211,14 +211,14 @@ def _gather_metrics() -> dict:
             crows_this = d1_client.query(
                 f"""SELECT COUNT(*) AS n FROM seo_outcomes
                     WHERE event IN ({placeholders})
-                      AND recorded_at >= datetime('now', '-7 days')""",
+                      AND datetime(recorded_at) >= datetime('now', '-7 days')""",
                 ge_values,
             )
             crows_last = d1_client.query(
                 f"""SELECT COUNT(*) AS n FROM seo_outcomes
                     WHERE event IN ({placeholders})
-                      AND recorded_at >= datetime('now', '-14 days')
-                      AND recorded_at <  datetime('now', '-7 days')""",
+                      AND datetime(recorded_at) >= datetime('now', '-14 days')
+                      AND datetime(recorded_at) <  datetime('now', '-7 days')""",
                 ge_values,
             )
             total_conv_this = int(crows_this[0]["n"]) if crows_this else 0
@@ -262,9 +262,18 @@ def _simplify_variant(r: dict) -> dict:
 # === HTML rendering ==========================================================
 
 
-def _pct_change(this_w: int, last_w: int) -> str:
+def _pct_change(this_w: int, last_w: int, plain: bool = False) -> str:
+    """Format a week-over-week percent change.
+
+    `plain=True` returns a value safe for a plaintext context (the email
+    Subject header), which must NOT contain HTML entities — otherwise an
+    inbox shows the literal text "+&infin;" instead of a rendered
+    infinity glyph. The HTML body keeps using the entity form.
+    """
     if last_w == 0:
-        return "+&infin;" if this_w > 0 else "+0%"
+        if this_w > 0:
+            return "+∞%" if plain else "+&infin;"
+        return "+0%"
     pct = (this_w - last_w) / last_w * 100
     sign = "+" if pct >= 0 else ""
     return f"{sign}{pct:.0f}%"
@@ -286,7 +295,7 @@ def build_digest() -> tuple[str, str]:
     subject = (
         f"{_subject_prefix()} {site} — "
         f"{tw['imp']:,} impressions / {tw['clk']:,} clicks "
-        f"({_pct_change(tw['imp'], lw['imp'])} imp wow)"
+        f"({_pct_change(tw['imp'], lw['imp'], plain=True)} imp wow)"
     )
 
     # Slot summary rows
