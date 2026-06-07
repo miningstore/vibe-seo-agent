@@ -313,12 +313,25 @@ def _apply_kill_promote(slot: cfg.Slot) -> None:
         return
     champion = next((s for s in stats if s.status == "champion"), None)
     if not champion:
-        # No champion yet — first variant to cross the promote bar becomes one.
-        for s in stats:
-            if s.impressions >= cfg.PROMOTE_MIN_IMPRESSIONS:
-                _promote(s.variant_id)
-                log.info("promoted first champion variant_id=%d", s.variant_id)
-                return
+        # No champion yet. Promote the BEST eligible arm by posterior mean,
+        # not merely the first to cross the impression bar. The old "first
+        # past the bar" rule crowned whichever arm *accumulated fastest* —
+        # which, while the reward signal was still warming up, was often a
+        # mediocre arm that then froze in place as champion and blocked
+        # stronger later arms for the full promote window. Requiring the
+        # impression floor still avoids crowning on a handful of trials.
+        eligible = [s for s in stats if s.impressions >= cfg.PROMOTE_MIN_IMPRESSIONS]
+        if eligible:
+            best = max(
+                eligible,
+                key=lambda s: s.alpha / (s.alpha + s.beta) if (s.alpha + s.beta) > 0 else 0.0,
+            )
+            best_mean = best.alpha / (best.alpha + best.beta) if (best.alpha + best.beta) > 0 else 0.0
+            _promote(best.variant_id)
+            log.info(
+                "promoted first champion variant_id=%d (best of %d eligible, mean=%.3f)",
+                best.variant_id, len(eligible), best_mean,
+            )
         return
 
     for s in stats:

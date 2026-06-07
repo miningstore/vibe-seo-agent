@@ -15,6 +15,13 @@ import { defineMiddleware } from 'astro:middleware';
 import { readCookie } from './lib/auth';
 import { resolveVariants, isExperimentPath, BOT_UA } from './lib/seo-variants';
 
+// Cloudflare Bot Management score at or below this is treated as automated
+// (scores run 1 = definitely bot .. 99 = definitely human). 30 is CF's
+// commonly-cited "likely automated" cutoff — conservative enough that real
+// humans (who score 80-99) are never excluded, while spoofed-UA scrapers
+// (which score low) stop entering the variant test pool.
+const BOT_SCORE_THRESHOLD = 30;
+
 /**
  * Two responsibilities:
  *
@@ -34,8 +41,35 @@ import { resolveVariants, isExperimentPath, BOT_UA } from './lib/seo-variants';
 export const onRequest = defineMiddleware(async (context, next) => {
   const path = context.url.pathname;
   const ua = context.request.headers.get('user-agent') || '';
-  const isBot = BOT_UA.test(ua);
   const cookieHeader = context.request.headers.get('cookie') || '';
+
+  // Bot detection OR's two signals:
+  //   1. User-Agent regex (BOT_UA) — self-identified crawlers.
+  //   2. Cloudflare Bot Management — `cf.botManagement.score` (1 = automated
+  //      .. 99 = human) plus `verifiedBot`. Catches scrapers that spoof a real
+  //      browser UA, which the regex alone cannot. Present only when Bot
+  //      Management / Bot Fight Mode evaluated the request; absent → fall back
+  //      to the UA check (purely additive, never a regression).
+  // Bots never get a cookie or a variant assignment — they see the champion.
+  const cf = (context.locals as any).runtime?.cf;
+  const rawScore = cf?.botManagement?.score;
+  const botScore: number | null =
+    typeof rawScore === 'number' && rawScore > 0 ? rawScore : null;
+  const scoreSaysBot = botScore !== null && botScore <= BOT_SCORE_THRESHOLD;
+  const isBot = BOT_UA.test(ua) || cf?.botManagement?.verifiedBot === true || scoreSaysBot;
+
+  // Real navigation source for THIS page request: the host of the Referer
+  // header ('www.google.com' on an organic-search click, null on a direct
+  // visit). Recorded on the assignment so the optimizer can score variants on
+  // organic-search humans (SEO_IMPRESSION_MODE='organic'); the same-origin
+  // event referrer on seo_outcomes always resolves to your own host and can't.
+  let referrerHost: string | null = null;
+  try {
+    const ref = context.request.headers.get('referer') || '';
+    if (ref) referrerHost = new URL(ref).host || null;
+  } catch {
+    referrerHost = null;
+  }
 
   // Resolve SEO variants before next() so the page template can read them.
   // Killswitch: SEO_OPTIMIZER_ENABLED=false disables variant assignment and
@@ -61,6 +95,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
         path,
         sessionId,
         isBot,
+        referrerHost,
+        botScore,
         waitUntil: (p) => {
           try {
             context.locals.runtime?.ctx?.waitUntil?.(p);

@@ -65,6 +65,32 @@ PROMOTE_BEATS_PROB = 0.95     # > 95% chance of beating → promote
 STALE_KILL_MIN_AGE_DAYS = int(os.environ.get("SEO_STALE_KILL_MIN_AGE_DAYS", "30"))
 STALE_KILL_MAX_IMPRESSIONS = int(os.environ.get("SEO_STALE_KILL_MAX_IMPRESSIONS", "100"))
 
+# --- Impression accounting: what counts as one bandit trial ---------------
+# The reward denominator. The default is engaged pageviews rather than raw
+# assignments because, in practice, a large share of assignments come from
+# clients that never run the tracker JS (non-JS bots that slip the UA filter)
+# — they add pure noise to every variant's posterior.
+#   'engaged'     — (default) one JS-confirmed pageview (a `view` outcome
+#                   event) = one impression. Bots that don't run JS, plus
+#                   anything the edge bot-score gate blocks, drop out.
+#   'organic'     — only engaged pageviews whose assignment carried an
+#                   organic-search referrer (Google/Bing/...). Cleanest
+#                   "real human with SEO intent" signal; lower volume.
+#   'assignments' — legacy: every SSR assignment is an impression (includes
+#                   non-JS bots). Kept for comparison / rollback only.
+# NOTE: 'engaged'/'organic' require the site to emit `view` events (and, for
+# 'organic', to record seo_assignments.referrer_host — see the example
+# integration migration). Sites with no on-page tracker must use 'assignments'.
+SEO_IMPRESSION_MODE = os.environ.get("SEO_IMPRESSION_MODE", "engaged").lower()
+
+# Hosts (SQL LIKE substrings, case-insensitive) treated as organic-search
+# referrers when SEO_IMPRESSION_MODE='organic'. Matched against
+# seo_assignments.referrer_host (the page-request Referer host).
+ORGANIC_REFERRER_LIKE = (
+    "%google.%", "%bing.%", "%duckduckgo%", "%yahoo.%",
+    "%ecosia.%", "%baidu.%", "%yandex.%", "%brave.%", "%startpage.%",
+)
+
 
 SlotKind = Literal["text", "faq", "schema"]
 
