@@ -82,83 +82,87 @@ DEFAULT_WEIGHTS = {
 }
 
 
+# The on-page event that proves a real (JS-executing) pageview. In the
+# 'engaged'/'organic' impression modes it is the unit of one bandit trial.
+IMPRESSION_VIEW_EVENT = "view"
+
+
 def engagement_score_d1(
     variant_id: int,
     hours: int = 24,
     slot: "cfg.Slot | None" = None,
     since: str | None = None,
 ) -> tuple[int, float]:
-    """Return (impressions, weighted_reward_sum) over a window.
+    """Return (impressions, weighted_reward_sum) for a variant over a window.
 
-    Two windowing modes:
+    Two WINDOW modes (orthogonal to the impression mode below):
+    - `since=<iso-timestamp>` (incremental, used by the loop): only rows
+      newer than the cursor. The loop passes each variant's
+      `posterior_updated_at`; update_posterior then bumps it to now().
+    - `since=None` + `hours=N` (rolling window, ad-hoc reports/health checks).
 
-    - `since=<iso-timestamp>` (incremental, used by the loop): count
-      only rows newer than the given timestamp. The loop passes each
-      variant's `posterior_updated_at` here, then update_posterior
-      bumps that timestamp to now(). This is what prevents the
-      "every-tick re-counts the last 24h" overcounting bug.
+    The IMPRESSION mode (cfg.SEO_IMPRESSION_MODE) decides what one trial is:
+    - 'engaged'     (default): one `view` outcome event = one impression.
+      Counting JS-confirmed pageviews instead of raw seo_assignments drops
+      assignments from non-JS bots that never fired the tracker and only
+      diluted the posterior.
+    - 'organic': as 'engaged', but restricted to pageviews whose assignment
+      carried an organic-search referrer (cfg.ORGANIC_REFERRER_LIKE). Reward
+      is filtered to the same sessions so the per-impression rate stays
+      consistent.
+    - 'assignments' (legacy): COUNT(*) of seo_assignments — includes bots.
 
-    - `since=None` + `hours=N` (rolling window, used for ad-hoc
-      reports / health checks): count rows in the last N hours. Same
-      semantics as the original implementation.
+    Reward is the weighted sum of outcome events (DEFAULT_WEIGHTS, with the
+    slot's goal_event boosted to goal_weight). `view` has weight 0, so in
+    engaged/organic mode a viewed-but-not-engaged pageview is one impression
+    with zero reward — exactly the Beta(alpha, beta) trial we want.
 
-    Per-event weights default to DEFAULT_WEIGHTS. When `slot.goal_event`
-    is set, the goal event gets `slot.goal_weight` (default 5.0) so
-    conversions dominate the reward signal once they start flowing.
-
-    Impression source: seo_assignments, NOT view events. SSR sites
-    (average-rent) get a `view` row per pageload via the in-page
-    tracker; static sites (miningstore) only get a single assignment
-    row when the Worker first sees a session. Assignments work for
-    both — and they're the bandit's natural impression unit
-    (one cookie shown one variant = one trial).
+    Timestamp columns are wrapped in datetime() on both sides because they
+    are ISO-8601 ('2026-05-25T17:59:12.348Z') while datetime('now') is
+    space-separated; a raw compare mis-orders them at the 'T'/' ' boundary.
+    Placeholders are anonymous '?' (not ?N) so the variable-length organic
+    clause binds positionally without a numbering clash.
     """
+    mode = getattr(cfg, "SEO_IMPRESSION_MODE", "engaged")
+
+    # Window predicate + its bound value, per table.
     if since:
-        # Wrap both sides in datetime() so SQLite normalizes the format
-        # comparison. assigned_at / recorded_at are ISO 8601 written by
-        # the Worker / Astro middleware (`new Date().toISOString()` =
-        # 2026-05-25T17:59:12.348Z); `posterior_updated_at` is written
-        # by `datetime('now')` (= 2026-05-25 17:59:12). Raw string
-        # comparison treats 'T' > ' ' (ASCII 84 vs 32), so Worker
-        # timestamps always test as greater than SQL cursor timestamps
-        # regardless of actual time — cursor never advances. datetime()
-        # on both sides parses to SQLite's internal format and
-        # compares correctly.
-        imp_sql = (
-            "SELECT COUNT(*) AS n FROM seo_assignments "
-            "WHERE variant_id = ?1 AND datetime(assigned_at) > datetime(?2)"
-        )
-        out_sql = (
-            "SELECT event, COUNT(*) AS n FROM seo_outcomes "
-            "WHERE variant_id = ?1 AND datetime(recorded_at) > datetime(?2) "
-            "GROUP BY event"
-        )
-        imp_params = [variant_id, since]
-        out_params = [variant_id, since]
+        win_assign = "datetime(assigned_at) > datetime(?)"
+        win_out = "datetime(o.recorded_at) > datetime(?)"
+        win_param: object = since
     else:
-        # Wrap assigned_at / recorded_at in datetime() for the SAME reason
-        # the since= branch above does: those columns are ISO-8601 strings
-        # written by the Worker / Astro middleware (`new Date().toISOString()`
-        # = 2026-05-25T17:59:12.348Z) while datetime('now', ...) renders the
-        # space-separated form (2026-05-25 17:59:12). A raw string compare
-        # treats 'T' (ASCII 84) > ' ' (ASCII 32) at index 10, so every row
-        # whose date-portion equals the cutoff day tests as "in window"
-        # regardless of its time-of-day — silently over-counting up to a
-        # full extra day of impressions/outcomes at the window boundary.
-        # datetime() on both sides normalizes the comparison.
+        win_assign = "datetime(assigned_at) > datetime('now', '-' || ? || ' hours')"
+        win_out = "datetime(o.recorded_at) > datetime('now', '-' || ? || ' hours')"
+        win_param = hours
+
+    # Organic EXISTS sub-clause, correlated on the outcome's session+variant.
+    organic_sql = ""
+    organic_params: list = []
+    if mode == "organic":
+        likes = list(getattr(cfg, "ORGANIC_REFERRER_LIKE", ()))
+        if likes:
+            ors = " OR ".join(["a.referrer_host LIKE ?"] * len(likes))
+            organic_sql = (
+                " AND EXISTS (SELECT 1 FROM seo_assignments a "
+                "WHERE a.session_id = o.session_id "
+                "AND a.variant_id = o.variant_id "
+                f"AND ({ors}))"
+            )
+            organic_params = likes
+
+    # --- impressions ---
+    if mode == "assignments":
         imp_sql = (
             "SELECT COUNT(*) AS n FROM seo_assignments "
-            "WHERE variant_id = ?1 "
-            "AND datetime(assigned_at) > datetime('now', '-' || ?2 || ' hours')"
+            f"WHERE variant_id = ? AND {win_assign}"
         )
-        out_sql = (
-            "SELECT event, COUNT(*) AS n FROM seo_outcomes "
-            "WHERE variant_id = ?1 "
-            "AND datetime(recorded_at) > datetime('now', '-' || ?2 || ' hours') "
-            "GROUP BY event"
+        imp_params: list = [variant_id, win_param]
+    else:
+        imp_sql = (
+            "SELECT COUNT(*) AS n FROM seo_outcomes o "
+            f"WHERE o.variant_id = ? AND o.event = ? AND {win_out}{organic_sql}"
         )
-        imp_params = [variant_id, hours]
-        out_params = [variant_id, hours]
+        imp_params = [variant_id, IMPRESSION_VIEW_EVENT, win_param, *organic_params]
 
     imp_rows = d1_client.query(imp_sql, imp_params)
     impressions = int(imp_rows[0]["n"]) if imp_rows else 0
@@ -166,6 +170,14 @@ def engagement_score_d1(
     weights = dict(DEFAULT_WEIGHTS)
     if slot is not None and getattr(slot, "goal_event", ""):
         weights[slot.goal_event] = float(getattr(slot, "goal_weight", 5.0))
+
+    # --- reward (weighted events; same window + organic filter) ---
+    out_sql = (
+        "SELECT o.event AS event, COUNT(*) AS n FROM seo_outcomes o "
+        f"WHERE o.variant_id = ? AND {win_out}{organic_sql} "
+        "GROUP BY o.event"
+    )
+    out_params = [variant_id, win_param, *organic_params]
 
     out_rows = d1_client.query(out_sql, out_params)
     reward = 0.0

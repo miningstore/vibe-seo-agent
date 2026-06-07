@@ -40,9 +40,13 @@
 
 type D1Database = import('@cloudflare/workers-types').D1Database;
 
-// Matches common crawler tokens as substrings (NOT word-bounded) because
-// strings like `Googlebot/2.1` have no word boundary between `e` and `b`.
-export const BOT_UA = /(bot|spider|crawler|slurp|bingpreview|duckduckbot|baiduspider|yandex|sogou|exabot|facebot|ia_archiver|ahrefs|semrush|petalbot|applebot|mj12|dotbot|rogerbot|headlesschrome|python-requests)/i;
+// Matches common crawler / non-browser-client tokens as substrings (NOT
+// word-bounded) because strings like `Googlebot/2.1` have no word boundary
+// between `e` and `b`. Single source of truth for UA-based bot detection —
+// import it everywhere (middleware + events endpoint) so the assignment side
+// and the outcome side can't drift apart. The CF bot-score gate in the
+// middleware covers the harder case of scrapers that spoof a browser UA.
+export const BOT_UA = /(bot|spider|crawler|slurp|bingpreview|duckduckbot|baiduspider|yandex|sogou|exabot|facebot|ia_archiver|ahrefs|semrush|petalbot|applebot|mj12|dotbot|rogerbot|headlesschrome|python-requests|httpclient|curl|wget|go-http-client|node-fetch|axios|okhttp|libwww|scrapy)/i;
 
 // Variants are tied to "page patterns" — coarse families like 'city_index'
 // or 'apartment'. Each pattern maps to a path regex and a slot prefix the
@@ -158,6 +162,15 @@ interface ResolveArgs {
   path: string;
   sessionId: string | null;       // null = treat as bot / champion-only
   isBot: boolean;
+  // Real navigation source (host of the page request's Referer header):
+  // 'www.google.com' for an organic click, null for direct. Recorded on the
+  // assignment so the optimizer can score variants on organic-search humans
+  // (SEO_IMPRESSION_MODE='organic'). Distinct from the same-origin event
+  // referrer on seo_outcomes, which always resolves to your own host.
+  referrerHost?: string | null;
+  // Cloudflare Bot Management score at render time (1 = bot .. 99 = human),
+  // or null when the signal is unavailable. Stored for post-hoc filtering.
+  botScore?: number | null;
   waitUntil: (p: Promise<any>) => void;
 }
 
@@ -242,7 +255,16 @@ export async function resolveVariants(args: ResolveArgs): Promise<{ variants: Va
   }
 
   if (writes.length > 0 && args.sessionId) {
-    args.waitUntil(writeAssignments(args.db, args.sessionId, args.path, writes));
+    args.waitUntil(
+      writeAssignments(
+        args.db,
+        args.sessionId,
+        args.path,
+        writes,
+        args.referrerHost ?? null,
+        args.botScore ?? null,
+      ),
+    );
   }
 
   return { variants };
@@ -297,15 +319,17 @@ async function writeAssignments(
   sessionId: string,
   pagePath: string,
   writes: { slot: string; variantId: number }[],
+  referrerHost: string | null = null,
+  botScore: number | null = null,
 ) {
   const now = new Date().toISOString();
   const stmts = writes.map((w) =>
     db
       .prepare(
-        `INSERT OR IGNORE INTO seo_assignments (session_id, slot, variant_id, page_path, assigned_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)`,
+        `INSERT OR IGNORE INTO seo_assignments (session_id, slot, variant_id, page_path, assigned_at, referrer_host, bot_score)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
       )
-      .bind(sessionId, w.slot, w.variantId, pagePath, now),
+      .bind(sessionId, w.slot, w.variantId, pagePath, now, referrerHost, botScore),
   );
   try {
     await db.batch(stmts);
