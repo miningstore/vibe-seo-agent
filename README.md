@@ -113,6 +113,26 @@ For non-Astro / non-Cloudflare stacks, see `docs/03-CUSTOMIZING.md` —
 the data shape is portable, the middleware pattern translates to Next.js,
 Remix, etc.
 
+### Health watchdog — `scripts/seo_health_alert.py`
+
+The loop fails silently in one nasty way: when the VPS Claude login expires,
+generation 401s — and when **all slots are saturated** the loop doesn't even
+attempt generation, so a dead login is invisible in the journal. A naive "0
+variants in 24h" check is wrong (0 variants is healthy when saturated), so
+this watchdog keys on *failure*: `systemctl` liveness, journal failure/auth
+markers, and a proactive `claude -p "AUTH_OK"` probe that catches a dead login
+even while saturated. It emails exact re-auth steps via ForwardEmail.
+
+`install_vps.sh` installs it as `seo-agent-health-alert.timer` (daily). Set
+`SEO_HEALTH_EMAIL` in the unit (or `.env`) to receive alerts, else it runs
+log-only. All knobs are env-overridable (`SEO_HEALTH_SERVICE`, `_HOURS`,
+`_SENDER`, `_ENV_FILE`, `_AUTH_PROBE`). Manual check / test:
+
+```bash
+python scripts/seo_health_alert.py --dry-run     # print verdict, never email
+python scripts/seo_health_alert.py --force-email # send a test alert now
+```
+
 ### Docs
 
 | Doc | Purpose |
@@ -121,6 +141,7 @@ Remix, etc.
 | `docs/02-VPS_DEPLOY.md` | SSH, git worktree, systemd, claude CLI auth |
 | `docs/03-CUSTOMIZING.md` | Per-site config: slots, banned tokens, prompts, middleware |
 | `docs/04-OPERATIONS.md` | What to watch, how to interpret D1 rows, how to debug |
+| `scripts/seo_health_alert.py` | Daily watchdog: emails on dead auth / hung / failing generation |
 
 ## The 2024 SA blockade — the thing this repo solves
 

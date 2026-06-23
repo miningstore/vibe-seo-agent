@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily vibe-seo-agent loop health alert
+
+[Timer]
+# Daily at 16:30 server-local (small random jitter). The alert is
+# idempotent — it emails at most once per day (sentinel) unless --force-email.
+OnCalendar=*-*-* 16:30:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=seo-agent-health-alert.service
+
+[Install]
+WantedBy=timers.target

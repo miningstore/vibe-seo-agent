@@ -1,0 +1,30 @@
+[Unit]
+Description=vibe-seo-agent loop health alert (emails on dead auth / hung / failing generation)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+# Read the (root-owned) seo-agent.service journal without sudo.
+SupplementaryGroups=systemd-journal
+WorkingDirectory=/home/ubuntu/seo-agent
+# .env supplies FORWARD_EMAIL_API_KEY (outbound mail) and, if you use the
+# durable-token auth, CLAUDE_CODE_OAUTH_TOKEN (the proactive auth probe).
+# Leading "-" makes it optional so the unit still starts (degrading to
+# log-only) if absent.
+EnvironmentFile=-/home/ubuntu/seo-agent/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/ubuntu/seo-agent
+# PATH must include ~/.local/bin so the `claude` CLI auth probe can run.
+Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
+# Set SEO_HEALTH_EMAIL to receive alerts (unset = log-only). Window +
+# monitored service are overridable here without touching code.
+Environment=SEO_HEALTH_HOURS=24
+# Environment=SEO_HEALTH_EMAIL=you@example.com
+Environment=SEO_HEALTH_SERVICE=seo-agent.service
+ExecStart=/usr/bin/python3 /home/ubuntu/seo-agent/scripts/seo_health_alert.py
+StandardOutput=journal
+StandardError=journal
+MemoryMax=256M
+CPUQuota=25%

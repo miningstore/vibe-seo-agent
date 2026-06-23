@@ -69,8 +69,9 @@ SYSTEMD_USER="${SUDO_USER:-$USER}"
 echo ""
 echo "Install systemd units?"
 echo "  This will copy systemd/*.service and *.timer to /etc/systemd/system/,"
-echo "  enable seo-gsc-poller.timer (nightly), and prepare seo-agent.service"
-echo "  (which you start manually once you've enabled slots in config.py)."
+echo "  enable seo-gsc-poller.timer (nightly) + seo-agent-health-alert.timer"
+echo "  (daily watchdog), and prepare seo-agent.service (which you start"
+echo "  manually once you've enabled slots in config.py)."
 read -rp "Proceed? [y/N] " yn
 if [[ "$yn" != "y" && "$yn" != "Y" ]]; then
   echo "Skipping systemd install. Re-run when ready."
@@ -78,6 +79,7 @@ if [[ "$yn" != "y" && "$yn" != "Y" ]]; then
 fi
 
 sudo cp systemd/seo-gsc-poller.service systemd/seo-gsc-poller.timer systemd/seo-agent.service \
+  systemd/seo-agent-health-alert.service systemd/seo-agent-health-alert.timer \
   /etc/systemd/system/
 
 # Patch the WorkingDirectory + paths if the user is not 'ubuntu' or
@@ -89,12 +91,16 @@ sudo sed -i \
   -e "s|PYTHONPATH=/home/ubuntu/seo-agent|PYTHONPATH=$PROJECT_DIR|g" \
   -e "s|PYTHONPATH=/home/ubuntu/vibe-seo-agent|PYTHONPATH=$PROJECT_DIR|g" \
   /etc/systemd/system/seo-gsc-poller.service \
-  /etc/systemd/system/seo-agent.service
+  /etc/systemd/system/seo-agent.service \
+  /etc/systemd/system/seo-agent-health-alert.service
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now seo-gsc-poller.timer
+sudo systemctl enable --now seo-agent-health-alert.timer
 echo ""
 echo "Enabled seo-gsc-poller.timer (runs nightly at 03:00 server-local)"
+echo "Enabled seo-agent-health-alert.timer (daily watchdog; set SEO_HEALTH_EMAIL"
+echo "  in the unit or .env to receive alerts, else it runs log-only)"
 sudo systemctl list-timers | grep seo
 
 echo ""
