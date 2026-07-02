@@ -18,23 +18,13 @@ What you can override:
 The template's `seo_agent/config.py` imports from this module and uses
 whatever you define here in place of the defaults.
 """
-from dataclasses import dataclass, field
-from typing import Literal
-
-SlotKind = Literal["text", "faq", "schema"]
-
-
-@dataclass
-class Slot:
-    name: str
-    pattern: str
-    kind: SlotKind
-    enabled: bool
-    description: str
-    min_len: int = 0
-    max_len: int = 0
-    banned_tokens: tuple[str, ...] = field(default_factory=tuple)
-    template_vars: tuple[str, ...] = field(default_factory=tuple)
+# IMPORTANT: import Slot from the template — never vendor a copy of the
+# dataclass here. A vendored copy silently drops every field the template
+# adds later (one deployment broke with "unexpected keyword argument
+# 'serp_visible'" exactly this way). The import is safe even though
+# config.py imports this module at its bottom: Slot is defined well
+# before that import executes.
+from .config import Slot, SlotKind  # noqa: F401
 
 
 # Tokens that may never appear in your variants. Common bans:

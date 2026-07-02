@@ -278,3 +278,20 @@ That is slow by design: one tenure is one *causal* read of what Google
 actually does with that snippet, which noisy parallel data can never
 give you. Keep the arm pool small for SERP slots (3-5 well-motivated
 candidates beat 8 spaghetti arms).
+
+
+## Do not vendor the Slot class into site_config.py
+
+`site_config.py` must import the dataclass from the template:
+
+```python
+from .config import Slot, SlotKind
+```
+
+A vendored copy of `Slot` silently drops every field the template adds
+later — a deployment that vendored it failed with
+`Slot.__init__() got an unexpected keyword argument 'serp_visible'`
+the day the template grew that field. The import is safe even though
+`config.py` imports `site_config` at its bottom: `Slot` is defined
+well before that import executes, so the partially-initialized module
+already carries it.
