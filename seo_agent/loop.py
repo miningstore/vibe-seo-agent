@@ -45,7 +45,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import allocator, config as cfg, d1_client, variant_generator
+from . import allocator, config as cfg, d1_client, serp_evaluator, variant_generator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -308,6 +308,18 @@ def _update_posteriors_for_slot(slot: cfg.Slot) -> None:
 
 
 def _apply_kill_promote(slot: cfg.Slot) -> None:
+    # SERP-visible slots (title/meta) are never judged by the engagement
+    # posterior: Googlebot only renders the champion, and a meta
+    # description renders nowhere on-page, so the parallel bandit's
+    # signal for them is noise. They rotate through sequential champion
+    # tenures scored on position-adjusted GSC CTR instead.
+    if getattr(slot, "serp_visible", False):
+        try:
+            serp_evaluator.apply(slot, commit=True)
+        except Exception as e:
+            log.warning("serp evaluator failed for %s: %s", slot.name, e)
+        return
+
     stats = allocator.load_variant_stats(slot.name)
     if not stats:
         return

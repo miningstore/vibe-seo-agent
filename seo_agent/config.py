@@ -124,6 +124,18 @@ class Slot:
     #   newsletter_signup       - email list opt-in
     goal_event: str = ""
     goal_weight: float = 5.0
+    # SERP-visible slots (<title>, meta description) are indexed by
+    # Googlebot, which always renders the CHAMPION. A parallel on-site
+    # A/B can therefore never measure their real effect (a meta
+    # description isn't even rendered on-page), so the engagement bandit
+    # must not pick their champions. Slots marked serp_visible=True are
+    # evaluated SEQUENTIALLY instead: serp_evaluator.py rotates each arm
+    # through a champion tenure and scores the tenure's position-adjusted
+    # GSC CTR. Requires a PATTERN_PATH_REGEX entry for the slot's
+    # pattern (see below / site_config.py). H1 and other on-page slots
+    # stay on the parallel bandit -- engagement measurement is causally
+    # valid for them.
+    serp_visible: bool = False
 
 
 # === EDIT BELOW: tokens that may never appear in your variants ===
@@ -141,6 +153,21 @@ HOUSE_STYLE_BANNED = (
     # "competitor_x", "competitor_y",
 )
 
+# Additional bans for SERP-VISIBLE slots only (title, meta_description).
+# Googlebot always renders the champion, so whatever wins these slots IS
+# the SERP snippet. Withhold-bait ("Unlock", "Pro-only", "members see")
+# reads as a paywall in the snippet and suppresses CTR -- searchers skip
+# results that sound like locked doors. If your site has a paid tier,
+# keep that framing on ON-PAGE slots (H1, hero) where it can actually
+# convert, never in the snippet. Override in site_config.py.
+SERP_WITHHOLD_BANNED = (
+    "unlock", "locked",
+    "pro access", "pro-only", "pro only", "pro required",
+    "pro member", "pro tier", "with pro", "go pro", "behind pro",
+    "free tier", "member pricing", "members see", "member access",
+    "members only", "sign up to see", "login to see",
+)
+
 
 # === EDIT BELOW: the slots your agent may vary ===
 # Recommended starting set for any site:
@@ -154,16 +181,25 @@ SLOTS: list[Slot] = [
     Slot(
         name="home.title", pattern="home", kind="text",
         enabled=False,
-        description="HTML <title> on the homepage.",
+        description=(
+            "HTML <title> on the homepage. SERP-VISIBLE: the champion is "
+            "the search snippet. Lead with the page's data/value answer; "
+            "no withhold framing."
+        ),
         min_len=30, max_len=60,
-        banned_tokens=HOUSE_STYLE_BANNED,
+        banned_tokens=HOUSE_STYLE_BANNED + SERP_WITHHOLD_BANNED,
+        serp_visible=True,
     ),
     Slot(
         name="home.meta_description", pattern="home", kind="text",
         enabled=False,
-        description="<meta name='description'> on the homepage.",
+        description=(
+            "<meta name='description'> on the homepage. SERP-VISIBLE and "
+            "rendered nowhere on-page: its only job is search CTR."
+        ),
         min_len=70, max_len=160,
-        banned_tokens=HOUSE_STYLE_BANNED,
+        banned_tokens=HOUSE_STYLE_BANNED + SERP_WITHHOLD_BANNED,
+        serp_visible=True,
     ),
     Slot(
         name="home.h1", pattern="home", kind="text",
@@ -179,16 +215,47 @@ SLOTS: list[Slot] = [
 ]
 
 
+# === Sequential SERP evaluation (serp_visible slots) ===
+# Googlebot renders only the champion, so title/meta arms are compared
+# ACROSS TIME: each arm holds the champion seat for a tenure, and
+# tenures are scored on position-adjusted GSC CTR over the slot's page
+# family. See seo_agent/serp_evaluator.py.
+SERP_TENURE_DAYS = int(os.environ.get("SEO_SERP_TENURE_DAYS", "14"))
+# Tenures with fewer GSC impressions than this are inconclusive: the arm
+# stays active and can be re-tenured later instead of judged on noise.
+SERP_TENURE_MIN_IMPRESSIONS = int(os.environ.get("SEO_SERP_TENURE_MIN_IMPRESSIONS", "500"))
+# GSC data is final only ~2-3 days behind real time; closed tenures are
+# measured (finalized) once they are at least this many days old.
+SERP_GSC_LAG_DAYS = int(os.environ.get("SEO_SERP_GSC_LAG_DAYS", "3"))
+# After every arm has had a tenure, arms whose aggregate adjusted CTR is
+# below (best * ratio) with conclusive volume are killed.
+SERP_LOSER_KILL_RATIO = float(os.environ.get("SEO_SERP_LOSER_KILL_RATIO", "0.8"))
+
+# Page-family path regexes, keyed by Slot.pattern. The SERP evaluator
+# aggregates GSC (page, impressions, clicks, position) rows for the
+# family a slot's champion renders on. REQUIRED (via site_config.py)
+# for every pattern that has serp_visible slots -- slots whose pattern
+# is missing here are skipped with a warning. Example:
+#   PATTERN_PATH_REGEX = {"home": r"^/$", "category": r"^/c/[^/]+/$"}
+PATTERN_PATH_REGEX: dict[str, str] = {
+    "home": r"^/$",
+}
+
 # Per-project overlay. If `seo_agent/site_config.py` exists with module-
-# level `SLOTS` and/or `HOUSE_STYLE_BANNED` and/or `PAGE_MATCH`, those
-# take precedence. This lets you customize without diverging the
-# upstream template — pull template updates without merging your slots.
+# level `SLOTS` and/or `HOUSE_STYLE_BANNED` and/or `SERP_WITHHOLD_BANNED`
+# and/or `PATTERN_PATH_REGEX` and/or `PAGE_MATCH`, those take precedence.
+# This lets you customize without diverging the upstream template —
+# pull template updates without merging your slots.
 try:
     from . import site_config as _site  # type: ignore
     if hasattr(_site, "SLOTS"):
         SLOTS = _site.SLOTS  # noqa: F811
     if hasattr(_site, "HOUSE_STYLE_BANNED"):
         HOUSE_STYLE_BANNED = _site.HOUSE_STYLE_BANNED  # noqa: F811
+    if hasattr(_site, "SERP_WITHHOLD_BANNED"):
+        SERP_WITHHOLD_BANNED = _site.SERP_WITHHOLD_BANNED  # noqa: F811
+    if hasattr(_site, "PATTERN_PATH_REGEX"):
+        PATTERN_PATH_REGEX = _site.PATTERN_PATH_REGEX  # noqa: F811
     PAGE_MATCH: dict[str, dict] = getattr(_site, "PAGE_MATCH", {})
 except ImportError:
     PAGE_MATCH = {}

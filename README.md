@@ -143,6 +143,19 @@ python scripts/seo_health_alert.py --force-email # send a test alert now
 | `docs/04-OPERATIONS.md` | What to watch, how to interpret D1 rows, how to debug |
 | `scripts/seo_health_alert.py` | Daily watchdog: emails on dead auth / hung / failing generation |
 
+## SERP-visible slots are evaluated sequentially, not in parallel
+
+Googlebot always renders the champion, and a meta description renders
+nowhere on-page — so a parallel on-site A/B measures nothing causal for
+`<title>`/meta slots and will happily promote noise into your actual
+search snippets. Slots marked `serp_visible=True` are therefore judged
+by `seo_agent/serp_evaluator.py` instead: each arm holds the champion
+seat for a 14-day tenure, tenures are scored on **position-adjusted GSC
+CTR** over the slot's page family, the static template fallback
+competes as a first-class arm, and decisive losers are killed. On-page
+slots (H1, hero copy) stay on the parallel engagement bandit, where the
+measurement is causally valid. See docs/03-CUSTOMIZING.md.
+
 ## The 2024 SA blockade — the thing this repo solves
 
 Since 2024, Google has blocked service-account emails from being added

@@ -90,6 +90,16 @@ def rebaseline(since: str, apply: bool) -> int:
     print("\nchampion re-pick:")
     swaps = 0
     for slot_name, recs in sorted(by_slot.items()):
+        slot_cfg = cfg.get_slot(slot_name)
+        if slot_cfg is not None and getattr(slot_cfg, "serp_visible", False):
+            # SERP-visible champions are owned by the sequential GSC-CTR
+            # evaluator (serp_evaluator.py); crowning them by engagement
+            # mean would reintroduce exactly the noise-promotion this
+            # slot class was moved off of. The posterior recompute above
+            # is still fine -- posteriors only drive the human-side
+            # sampling mix.
+            print(f"  {slot_name:30} serp_visible; champion owned by serp_evaluator, skipping")
+            continue
         eligible = [x for x in recs if x["_imps"] >= cfg.PROMOTE_MIN_IMPRESSIONS]
         cur = next((x for x in recs if x["status"] == "champion"), None)
         if not eligible:

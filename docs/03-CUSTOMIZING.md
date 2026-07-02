@@ -220,3 +220,61 @@ Recommended layout: separate `.env` per site, separate systemd unit
 per site, all reading from the same `credentials/` directory. The
 OAuth user can see all GSC properties they own, and the GA4 properties
 they're Editor on, with the single shared token.
+
+
+## SERP-visible slots: sequential evaluation, not parallel A/B
+
+`<title>` and meta-description slots need special handling, and the
+agent now enforces it. Two facts make the parallel bandit meaningless
+for them:
+
+1. **Googlebot always renders the champion.** The snippet searchers see
+   never varies with the on-site assignment split, so a parallel test
+   can't observe SERP CTR differences between arms.
+2. **A meta description renders nowhere on-page** (and a title only in
+   the browser tab), so the on-site engagement "reward" for those arms
+   is statistical noise. Left alone, the bandit will promote *something*
+   from that noise -- in the reference deployment it crowned
+   paywall-scented copy that held search CTR near 0.1% at page-one
+   positions.
+
+Mark such slots `serp_visible=True`. The loop then routes their
+kill/promote decisions to `seo_agent/serp_evaluator.py`, which runs a
+**sequential champion-tenure test**:
+
+- Each arm holds the champion seat for `SEO_SERP_TENURE_DAYS`
+  (default 14).
+- A tenure is scored from the GSC API directly:
+  `adjusted_ctr = ctr / expected_ctr(avg_position)` over the slot's
+  page family, so position drift between tenures doesn't masquerade as
+  snippet quality.
+- The static template fallback participates as a first-class arm
+  (a tenure with `variant_id NULL` measures it).
+- After every arm has been measured, the best conclusive arm is
+  crowned; decisively worse arms (below `SEO_SERP_LOSER_KILL_RATIO`
+  of the best, default 0.8) are killed.
+
+Setup checklist:
+
+1. Set `serp_visible=True` on the slot (title/meta only; H1s stay on
+   the parallel bandit -- they render on-page, so engagement
+   measurement is causally valid there).
+2. Add the slot's pattern to `PATTERN_PATH_REGEX` in
+   `site_config.py` (e.g. `{"category": r"^/c/[^/]+/$"}`).
+3. Add `SERP_WITHHOLD_BANNED` to the slot's `banned_tokens` so the
+   generator can't propose paywall-scented snippet copy at all.
+4. Apply `examples/astro-cloudflare/migrations/0004_seo_serp_tenures.sql`
+   (or let the evaluator create the table on its first `--commit` run).
+
+Operate / inspect:
+
+```bash
+python -m seo_agent.serp_evaluator            # dry-run all serp slots
+python -m seo_agent.serp_evaluator --commit   # apply (loop does this automatically)
+```
+
+Expect one full rotation to take `arms x SEO_SERP_TENURE_DAYS` days.
+That is slow by design: one tenure is one *causal* read of what Google
+actually does with that snippet, which noisy parallel data can never
+give you. Keep the arm pool small for SERP slots (3-5 well-motivated
+candidates beat 8 spaghetti arms).

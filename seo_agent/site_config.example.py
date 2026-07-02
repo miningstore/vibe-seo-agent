@@ -95,3 +95,15 @@ PAGE_MATCH: dict[str, dict] = {
     "home.meta_description": {"path": "/"},
     "home.h1":               {"path": "/"},
 }
+
+
+# Page-family path regexes for SERP-visible slots, keyed by Slot.pattern.
+# REQUIRED for every pattern that has serp_visible=True slots: the
+# sequential SERP evaluator (serp_evaluator.py) aggregates GSC clicks /
+# impressions / position over the matching pages to score each champion
+# tenure. Patterns without an entry are skipped with a warning.
+PATTERN_PATH_REGEX: dict[str, str] = {
+    "home": r"^/$",
+    # "category": r"^/c/[^/]+/$",
+    # "product":  r"^/p/[^/]+/$",
+}
