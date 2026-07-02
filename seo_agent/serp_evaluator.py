@@ -188,13 +188,30 @@ def _path_from_url(url: str) -> str | None:
     return path
 
 
-def gather_gsc(pattern: str, start_iso: str, end_iso: str) -> tuple[int, int, float]:
-    """(impressions, clicks, weighted_avg_position) for a page family
-    over [start, end] calendar dates, straight from the GSC API."""
+def page_regex_for(slot: "cfg.Slot") -> re.Pattern | None:
+    """The page filter a slot's tenures are measured over.
+
+    Preference order:
+    1. A per-slot exact path from PAGE_MATCH ({"path": "/pricing/"}) —
+       sites whose slots each target one URL (all slots sharing a
+       generic pattern like "page") get per-slot measurement.
+    2. The slot pattern's PATTERN_PATH_REGEX entry — sites whose slots
+       cover a whole page family ({} page_match + template_vars).
+    """
+    pm = cfg.page_match_for(slot.name)
+    path = pm.get("path") if isinstance(pm, dict) else None
+    if path:
+        return re.compile("^" + re.escape(path.rstrip("/")) + "/?$")
+    rx = cfg.PATTERN_PATH_REGEX.get(slot.pattern)
+    return re.compile(rx) if rx else None
+
+
+def gather_gsc(rx: re.Pattern, start_iso: str, end_iso: str) -> tuple[int, int, float]:
+    """(impressions, clicks, weighted_avg_position) for pages matching
+    `rx` over [start, end] calendar dates, straight from the GSC API."""
     from . import gsc_client
     from .gsc_poller import _site_url
 
-    rx = re.compile(cfg.PATTERN_PATH_REGEX[pattern])
     start_date = start_iso[:10]
     end_date = end_iso[:10]
     imp = 0
@@ -280,12 +297,15 @@ def finalize_closed_tenures(slot: "cfg.Slot", commit: bool) -> None:
            WHERE slot = ?1 AND ended_at IS NOT NULL AND finalized = 0""",
         [slot.name],
     )
+    rx = page_regex_for(slot)
+    if rx is None:
+        return
     for r in rows:
         t = _row_to_tenure(r)
         if _age_days(t.ended_at) < cfg.SERP_GSC_LAG_DAYS:
             log.info("tenure id=%d closed %.1fd ago — waiting for GSC lag window", t.id, _age_days(t.ended_at))
             continue
-        imp, clk, wpos = gather_gsc(slot.pattern, t.started_at, t.ended_at)
+        imp, clk, wpos = gather_gsc(rx, t.started_at, t.ended_at)
         adj = None
         if imp >= cfg.SERP_TENURE_MIN_IMPRESSIONS and wpos > 0:
             adj = (clk / imp) / expected_ctr(wpos)
@@ -338,8 +358,11 @@ def apply(slot: "cfg.Slot", commit: bool = True) -> None:
     if not getattr(slot, "serp_visible", False):
         log.warning("slot %s is not serp_visible — skipping", slot.name)
         return
-    if slot.pattern not in cfg.PATTERN_PATH_REGEX:
-        log.warning("slot %s pattern %r has no PATTERN_PATH_REGEX entry — skipping", slot.name, slot.pattern)
+    if page_regex_for(slot) is None:
+        log.warning(
+            "slot %s has no page filter (no PAGE_MATCH path and no "
+            "PATTERN_PATH_REGEX[%r]) — skipping", slot.name, slot.pattern,
+        )
         return
 
     ensure_table(commit)
