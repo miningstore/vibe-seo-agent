@@ -46,7 +46,16 @@ type D1Database = import('@cloudflare/workers-types').D1Database;
 // import it everywhere (middleware + events endpoint) so the assignment side
 // and the outcome side can't drift apart. The CF bot-score gate in the
 // middleware covers the harder case of scrapers that spoof a browser UA.
-export const BOT_UA = /(bot|spider|crawler|slurp|bingpreview|duckduckbot|baiduspider|yandex|sogou|exabot|facebot|ia_archiver|ahrefs|semrush|petalbot|applebot|mj12|dotbot|rogerbot|headlesschrome|python-requests|httpclient|curl|wget|go-http-client|node-fetch|axios|okhttp|libwww|scrapy)/i;
+//
+// AI/AEO crawlers are included even when their UA carries no bot/spider/crawler
+// token (meta-externalagent, ChatGPT-User, OAI-SearchBot, PerplexityBot, ...).
+// Matching them matters for two reasons: (1) they must see the CHAMPION, not an
+// under-tested variant — otherwise your AI-answer snippet is built from noise;
+// (2) they must be excluded from the bandit test pool, or their impressions
+// pollute the Beta posteriors and skew which variant "wins". If a downstream
+// integration also blocks/bot-gates on this regex, matching here is what keeps
+// those crawlers from being wrongly blocked (SEO/AEO safety).
+export const BOT_UA = /(bot|spider|crawler|slurp|bingpreview|duckduckbot|baiduspider|yandex|sogou|exabot|facebot|ia_archiver|ahrefs|semrush|petalbot|applebot|mj12|dotbot|rogerbot|headlesschrome|python-requests|httpclient|curl|wget|go-http-client|node-fetch|axios|okhttp|libwww|scrapy|externalagent|chatgpt-user|oai-searchbot|perplexitybot|claudebot|bytespider|amazonbot|google-extended|cohere-ai|timpibot)/i;
 
 // Variants are tied to "page patterns" — coarse families like 'city_index'
 // or 'apartment'. Each pattern maps to a path regex and a slot prefix the

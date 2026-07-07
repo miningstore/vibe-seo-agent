@@ -45,8 +45,12 @@ export interface Env {
 
 // Crawler UA pattern — substring match (NOT word-bounded — Googlebot/2.1
 // has no word boundary between e and b). Bots see the static fallback.
+// Includes AI/AEO crawlers whose UA carries no bot/spider/crawler token
+// (meta-externalagent, ChatGPT-User, OAI-SearchBot, PerplexityBot, ...) so
+// answer engines get the champion, not an under-tested variant, and never
+// pollute the bandit test pool.
 const BOT_UA =
-  /(bot|spider|crawler|slurp|bingpreview|duckduckbot|baiduspider|yandex|sogou|exabot|facebot|ia_archiver|ahrefs|semrush|petalbot|applebot|mj12|dotbot|rogerbot|headlesschrome|python-requests)/i;
+  /(bot|spider|crawler|slurp|bingpreview|duckduckbot|baiduspider|yandex|sogou|exabot|facebot|ia_archiver|ahrefs|semrush|petalbot|applebot|mj12|dotbot|rogerbot|headlesschrome|python-requests|externalagent|chatgpt-user|oai-searchbot|perplexitybot|claudebot|bytespider|amazonbot|google-extended|cohere-ai|timpibot)/i;
 
 // Variant resolution result.
 interface VariantResolution {
