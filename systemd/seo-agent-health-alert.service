@@ -26,5 +26,9 @@ Environment=SEO_HEALTH_SERVICE=seo-agent.service
 ExecStart=/usr/bin/python3 /home/ubuntu/seo-agent/scripts/seo_health_alert.py
 StandardOutput=journal
 StandardError=journal
-MemoryMax=256M
-CPUQuota=25%
+# The `claude -p` auth probe is a Node process (~300M RSS, ~3s of CPU). Caps
+# below that make it thrash and blow the probe's 60s deadline whenever the
+# host is busy, producing false "re-authenticate" alerts for a healthy token.
+# Keep these at >=1G / 100%.
+MemoryMax=1G
+CPUQuota=100%

@@ -160,15 +160,18 @@ def _auth_probe(timeout: int = 60) -> tuple[bool, str]:
         or str(Path.home() / ".local" / "bin" / "claude")
     if not (Path(claude).exists() or shutil.which(claude)):
         return True, "claude CLI not found; skipped auth probe"
-    try:
-        out = subprocess.run(
-            [claude, "-p", "Reply with exactly: AUTH_OK", "--output-format", "text"],
-            capture_output=True, text=True, timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        return False, f"auth probe timed out after {timeout}s"
-    except OSError as exc:
-        return True, f"auth probe could not run ({exc}); skipped"
+    cmd = [claude, "-p", "Reply with exactly: AUTH_OK", "--output-format", "text"]
+    out = None
+    for attempt in (1, 2):  # one retry: host load can stall the CLI past the deadline
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            break
+        except subprocess.TimeoutExpired:
+            if attempt == 2:
+                return False, (f"auth probe timed out twice ({timeout}s each; slow/hung "
+                               "CLI or host load, NOT a rejected token)")
+        except OSError as exc:
+            return True, f"auth probe could not run ({exc}); skipped"
     blob = f"{out.stdout}\n{out.stderr}"
     if "AUTH_OK" in out.stdout:
         return True, "auth probe OK"
@@ -234,6 +237,27 @@ def _build_email(stats: dict, *, hours: int, active: bool, auth_ok: bool,
                     f"  ssh VPS -> sudo systemctl status {service}",
                     f"  sudo journalctl -u {service} -n 100 --no-pager",
                 ])
+
+    if not auth_ok and auth_j == 0 and "timed out" in auth_detail:
+        # A rejected token fails FAST with a login error; it never times out.
+        # A timeout means the CLI was starved (host load) or wedged, and
+        # rotating a healthy token would fix nothing.
+        return ("⚠️ SEO agent: auth probe timed out — host busy or CLI slow",
+                header + [
+                    "The `claude -p` probe hit its deadline twice, but the loop journal "
+                    "has zero auth failures. A rejected token fails fast with a login "
+                    "error, it does not time out, so the token is almost certainly still "
+                    "valid and the CLI was starved (host load) or wedged. Check before "
+                    "touching the token:",
+                    "",
+                    "  ssh VPS -> uptime && free -m   (was the box loaded at probe time?)",
+                    "  time claude -p 'Reply AUTH_OK'   (manual probe; expect ~5-10s)",
+                    f"  sudo journalctl -u {service} -n 50 --no-pager",
+                    "",
+                    "Rotate the token (steps below) ONLY if the manual probe itself "
+                    "shows a login/permission error:",
+                    "",
+                ] + _reauth_steps(service, env_file))
 
     if not auth_ok or auth_j > 0:
         return (f"\U0001F6A8 SEO agent: Claude auth is broken — re-authenticate",
