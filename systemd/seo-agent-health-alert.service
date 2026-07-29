@@ -22,6 +22,11 @@ Environment=PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin
 # monitored service are overridable here without touching code.
 Environment=SEO_HEALTH_HOURS=24
 # Environment=SEO_HEALTH_EMAIL=you@example.com
+# SEO_HEALTH_SENDER is REQUIRED for delivery: the from-domain must exist on
+# your ForwardEmail account or the API rejects the send with HTTP 400
+# "Domain does not exist on your account" (the script's default sender is a
+# non-deliverable example.com placeholder).
+# Environment="SEO_HEALTH_SENDER=SEO Agent Ops <noreply@your-domain.com>"
 Environment=SEO_HEALTH_SERVICE=seo-agent.service
 ExecStart=/usr/bin/python3 /home/ubuntu/seo-agent/scripts/seo_health_alert.py
 StandardOutput=journal
