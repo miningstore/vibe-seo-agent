@@ -51,12 +51,22 @@ def query(sql: str, params: list[Any] | None = None) -> list[dict]:
     Retries on 429 + 5xx with exponential backoff + random jitter so
     concurrent agents on the same VPS don't retry in lockstep against
     the same D1 outage. Jitter is 0-500ms on top of the 2**attempt
-    base (1s, 2s, 4s).
+    base (1s, 2s, 4s). Transport failures (connection reset, TLS EOF,
+    timeout) retry the same way but only for SELECTs: a write whose
+    connection died mid-response may already have executed server-side,
+    and retrying it could double-apply the statement.
     """
     import random
     body = {"sql": sql, "params": params or []}
+    read_only = sql.lstrip()[:6].upper() == "SELECT"
     for attempt in range(3):
-        resp = requests.post(_endpoint(), json=body, headers=_headers(), timeout=30)
+        try:
+            resp = requests.post(_endpoint(), json=body, headers=_headers(), timeout=30)
+        except (requests.ConnectionError, requests.Timeout):
+            if read_only and attempt < 2:
+                time.sleep(2 ** attempt + random.uniform(0, 0.5))
+                continue
+            raise
         if resp.status_code == 200:
             data = resp.json()
             if not data.get("success"):
